@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bcube-domain-console",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*"]
+  },
+  "routes": [{ "pattern": "domain.b-cube.kr", "custom_domain": true }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bcube-domain",
+      // `wrangler d1 create bcube-domain` 후 실제 id로 교체한다.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "triggers": { "crons": ["17 * * * *", "0 18 * * *", "30 18 * * 0"] },
+  "observability": { "enabled": true },
+  "vars": {
+    "APP_ORIGIN": "https://domain.b-cube.kr",
+    "ZONE_NAME": "b-cube.kr",
+    // 사용자 제공 값으로 채운다.
+    "CF_ZONE_ID": "",
+    "GOOGLE_CLIENT_ID": "",
+    "ALLOWED_EMAIL_DOMAIN": "ajou.ac.kr",
+    "REQUIRE_HD": "false",
+    "ADMIN_EMAILS": "",
+    "MAX_LEASES_PER_USER": "3",
+    "LEASE_DAYS": "180",
+    "RENEW_WINDOW_DAYS": "30",
+    "NAME_HOLD_DAYS": "30",
+    "HEALTH_GRACE_DAYS": "3",
+    "HEALTH_FAIL_THRESHOLD": "7",
+    "EXTRA_RESERVED_NAMES": "",
+    "DNS_DRY_RUN": "false",
+    "DEV_AUTH_DEBUG": "false",
+    "DEV_FAKE_LOGIN": "false"
+  }
+}

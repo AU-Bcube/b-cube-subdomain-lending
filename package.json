@@ -1,0 +1,44 @@
+{
+  "name": "bcube-domain-console",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite build && vite preview",
+    "db:migrate:local": "wrangler d1 migrations apply bcube-domain --local",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:reset": "tsx scripts/reset-local-db.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.worker.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "deploy": "vite build && wrangler deploy",
+    "cf-typegen": "wrangler types worker/worker-configuration.d.ts"
+  },
+  "dependencies": {
+    "@carbon/icons-react": "^11.91.0",
+    "@carbon/react": "^1.119.0",
+    "@carbon/styles": "^1.118.0",
+    "@fontsource/ibm-plex-sans-kr": "^5.3.0",
+    "hono": "^4.13.14",
+    "jose": "^6.2.13",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.65.0",
+    "@cloudflare/vitest-plugin": "^1.4.7",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "sass": "^1.106.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.152.0"
+  }
+}
