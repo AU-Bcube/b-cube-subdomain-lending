@@ -130,7 +130,7 @@
 | `npm run db:migrate:local` | `wrangler d1 migrations apply bcube-domain --local` |
 | `npm run db:seed` | 로컬 D1에 시드 데이터 투입 (§4.3) |
 | `npm run db:reset` | 로컬 D1 상태 삭제 → 마이그레이션 → 시드 (원클릭 초기화) |
-| `npm run typecheck` | `tsc --noEmit` |
+| `npm run typecheck` | `tsc --noEmit`를 app(`src`, `shared`), worker(`worker`, `shared`, `test`), node(설정 파일, `scripts`) tsconfig 3개에 각각 실행 |
 | `npm test` | Vitest 전체 실행 |
 | `npm run deploy` | `vite build && wrangler deploy`. **실행 전 사용자 확인 필수** |
 
@@ -258,7 +258,20 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_audit_at ON audit_logs(at);
 CREATE INDEX idx_audit_lease ON audit_logs(lease_id);
 CREATE INDEX idx_audit_actor ON audit_logs(actor_email);
+
+-- 드리프트 점검(reconcile) 실행 결과 (§10.3). 관리자 드리프트 탭은 최근 1건을 보여준다.
+CREATE TABLE reconcile_runs (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  at           INTEGER NOT NULL,
+  ok           INTEGER NOT NULL,            -- 1이면 Cloudflare 조회 성공
+  drift_count  INTEGER NOT NULL,
+  items        TEXT NOT NULL,               -- JSON 배열 (cf_only / db_only / mismatch)
+  error        TEXT
+);
+CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
 ```
+
+- `migrations/0002_suspended_at.sql`: `leases.suspended_at INTEGER` (suspended로 바뀐 시각). §10.2의 "suspended 상태로 `NAME_HOLD_DAYS` 경과" 판단에 쓴다.
 
 **감사 로그 action 목록**: `auth.login`, `auth.login_denied`, `auth.logout`, `lease.create`, `lease.update_records`, `lease.renew`, `lease.release`, `lease.recheck`, `lease.reactivate`, `system.health_fail`, `system.suspend`, `system.expire`, `admin.revoke`, `admin.ban`, `admin.unban`, `system.drift_detected`
 
@@ -348,15 +361,18 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 
 | target_kind | 본 레코드(`alice.b-cube.kr`) | 추가 허용 TXT |
 |---|---|---|
-| `vercel` | CNAME 1개, 기본값 `cname.vercel-dns.com` (사용자가 Vercel이 안내한 다른 `*.vercel-dns.com` 값으로 변경 가능) | `_vercel.b-cube.kr` TXT (아래 규칙) |
+| `vercel` | CNAME 1개, 기본값 `cname.vercel-dns.com` (사용자가 Vercel이 안내한 다른 `*.vercel-dns.com` 또는 `*.vercel-dns-<숫자>.com` 값으로 변경 가능) | `_vercel.b-cube.kr` TXT (아래 규칙) |
 | `ip` | A 최대 2개 + AAAA 최대 2개 (최소 1개) | `alice.b-cube.kr` TXT, `_acme-challenge.alice.b-cube.kr` TXT |
 | `cname` | CNAME 1개 | `_acme-challenge.alice.b-cube.kr` TXT |
 
+- Vercel 프로젝트별 CNAME 값은 `d1d4fc829fe7bc7c.vercel-dns-017.com` 형태다(Vercel 문서, 2026-10 확인).
+
 공통 제한:
+- 레코드 입력의 `host`는 FQDN으로 받는다(예: `alice.b-cube.kr`, `_vercel.b-cube.kr`, `_acme-challenge.alice.b-cube.kr`). 대소문자와 끝의 점은 정규화한다.
 - CNAME이 있는 host에는 다른 레코드를 둘 수 없다(DNS 규칙).
 - lease당 TXT는 최대 5개, 값은 최대 512자이며 출력 가능한 ASCII만 허용한다.
 - **Vercel 검증 TXT**: host는 `_vercel.b-cube.kr`(존 루트)다. 값은 반드시 `vc-domain-verify=alice.b-cube.kr,`로 시작해야 하며, 자기 lease의 FQDN만 허용한다. 이 레코드는 여러 회원의 값이 같은 host에 공존하므로 **해당 record id 단위로만 삭제**한다.
-  - Vercel 검증 형식은 구현 시 Vercel 공식 문서로 확인하고, 다르면 보고한다.
+  - Vercel 문서(2026-10 확인)는 위치(`_vercel.<apex>`)와 여러 값의 공존만 명시하고 값 형식은 명시하지 않는다. 위 형식을 유지한다.
 - **A/AAAA 값**: 유효한 공인 IP만 허용한다. 아래 대역은 거부한다.
   - IPv4: `0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.0.0.0/24, 192.0.2.0/24, 192.168.0.0/16, 198.18.0.0/15, 198.51.100.0/24, 203.0.113.0/24, 224.0.0.0/4, 240.0.0.0/4, 255.255.255.255/32`
   - IPv6: `::/128, ::1/128, ::ffff:0:0/96, 64:ff9b::/96, fc00::/7, fe80::/10, ff00::/8, 2001:db8::/32`
@@ -378,10 +394,16 @@ lease 하나(`alice`)의 레코드 구성 규칙:
   - 레코드 세트를 교체할 때는 순서를 지킨다: 1) 새 레코드 생성 → 2) DB 갱신 → 3) 기존 레코드 삭제.
   - 중간에 실패하면 생성한 것을 롤백한다. 그래도 남는 불일치는 reconcile cron이 감지한다.
   - D1 batch로 DB 갱신을 원자적으로 처리한다.
+  - 내용이 같은 레코드는 건드리지 않는다. CNAME은 같은 host에 둘 이상 둘 수 없어 "생성 후 삭제"가 불가능하므로 기존 레코드를 수정(PATCH)하고, 실패하면 원래 값으로 되돌린다.
+  - 3) 기존 레코드 삭제가 실패해도 작업은 성공으로 응답한다. 남은 레코드는 드리프트 점검이 감지한다.
 
 ## 9. API 명세
 
 모든 응답은 JSON이고, 에러 형식은 `{ error: { code, message } }`다. 입력은 zod로 검증한다.
+
+- 레코드 검증 실패(400 `invalid_records`)에는 `error.errors: [{ index?, code, message }]`(입력 순번별 오류)가 붙는다.
+- 이름은 trim 후 소문자로 정규화해 검사한다. 이름 오류 코드는 형식·예약어·금칙어면 400, `taken`·`held`·`conflict`면 409다.
+- Cloudflare 실패는 502 `dns_error`(일반화한 메시지)다.
 
 ### 인증
 | Method | Path | 설명 |
@@ -393,7 +415,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 ### 사용자
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/me` | `{ email, name, isAdmin, csrfToken, limits: { max, used } }` |
+| GET | `/api/me` | `{ email, name, isAdmin, csrfToken, zone, limits: { max, used } }`. `zone`은 `ZONE_NAME`(예: `b-cube.kr`)이며 화면에서 FQDN을 표시할 때 쓴다 |
 | GET | `/api/names/:name/availability` | `{ available, reason? }`. 이유 코드: `invalid_format`, `reserved`, `banned_word`, `taken`, `held`, `conflict` |
 | GET | `/api/leases` | 내 lease 목록 (records 포함) |
 | GET | `/api/leases/:id` | 상세 + 해당 lease의 감사 로그 |
@@ -401,6 +423,9 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 | PUT | `/api/leases/:id/records` | 레코드 세트 전체 교체. active 상태에서만 가능 |
 | POST | `/api/leases/:id/renew` | 만료 `RENEW_WINDOW_DAYS` 이내일 때만 가능. `expires_at = now + LEASE_DAYS` |
 | POST | `/api/leases/:id/recheck` | 즉시 헬스체크. suspended 상태에서 통과하면 레코드를 재생성하고 active로 전환 |
+
+`renew`, `recheck`, `DELETE`는 active와 suspended에서 가능하다(그 외 409). `recheck`는 lease당 1분에 1회(429 `recheck_too_soon`)이며 실패해도 `health_fail_count`를 올리지 않는다(누적은 cron만 한다). suspended의 재확인은 DNS 레코드가 없으므로 CNAME 대상의 DoH 조회(IP는 TCP 연결)만 한다. 소유자에게 보여주는 lease 감사 로그(`GET /api/leases/:id`)는 최근 100건이며 작업자 이메일과 IP를 숨긴다.
+
 | DELETE | `/api/leases/:id` | 반납. Cloudflare 레코드 삭제 → status `released` |
 
 ### 관리자 (남용 대응)
@@ -409,7 +434,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 | GET | `/api/admin/leases?status=&q=&page=` | 전체 lease (이름/소유자 검색) |
 | POST | `/api/admin/leases/:id/revoke` | `{ reason }` 필수. 강제 회수 → Cloudflare 삭제, status `revoked` |
 | GET | `/api/admin/users?q=&banned=` | 사용자 목록, 보유 lease 수 |
-| POST | `/api/admin/users/:email/ban` | `{ reason }` 필수. 차단 → 해당 사용자의 세션 전부 삭제, 모든 active lease를 revoke(사유: `user_banned`) |
+| POST | `/api/admin/users/:email/ban` | `{ reason }` 필수. 차단 → 해당 사용자의 세션 전부 삭제, 모든 active·suspended lease를 revoke(사유: `user_banned`). suspended를 남기면 차단된 사용자가 이름을 계속 점유하기 때문이다. 자기 자신은 차단할 수 없다(400 `cannot_ban_self`) |
 | POST | `/api/admin/users/:email/unban` | 차단 해제 (revoke된 lease는 복구하지 않음) |
 | GET | `/api/admin/audit-logs?actor=&action=&lease=&from=&to=&page=` | 감사 로그 조회 |
 | GET | `/api/admin/drift` | 최근 reconcile 결과 |
@@ -421,6 +446,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 ### 10.1 만료 처리: 매일 `0 18 * * *` (KST 03:00)
 - `status='active' AND expires_at < now`인 lease → Cloudflare 레코드 삭제, `status='expired'`, `ended_at=now`, 감사 로그 `system.expire`
 - 만료 `RENEW_WINDOW_DAYS` 이내인 lease는 UI 상단에 경고 배너를 띄운다(별도 알림 발송 없음).
+- `expires_at <= now`인 `sessions` 행을 삭제한다. 만료 세션은 조회 단계에서 이미 거부되므로 테이블 정리 목적이다.
 
 ### 10.2 헬스체크: 매시 `17 * * * *`
 - Workers 서브요청 한도를 고려해 매 실행마다 `last_health_check_at`이 가장 오래된 active lease **최대 10개**만 처리한다.
@@ -445,11 +471,14 @@ lease 하나(`alice`)의 레코드 구성 규칙:
     - `status='suspended'`, `status_reason='health_check_failed'`, 감사 로그 `system.suspend`
   - suspended 상태의 이름은 소유자에게 유지된다. 소유자가 "재확인"을 눌러 통과하면 레코드를 재생성하고 다시 active로 전환한다.
   - suspended 상태로 `NAME_HOLD_DAYS`가 지나면 → `expired`로 전환한다.
+    - 이 전환과 "suspended인데 `expires_at`이 지난 lease"의 만료는 매일 만료 cron(§10.1)에서 처리한다. `status_reason`은 `lease_expired` 또는 `suspended_too_long`이다.
+  - 실패 횟수와 `system.health_fail` 기록은 KST 기준 하루 1회다.
 
 ### 10.3 드리프트 점검: 매주 `30 18 * * 0`
 - Cloudflare에서 comment가 `bcd:lease=`인 레코드 목록과 DB records를 비교한다.
 - Cloudflare에만 있거나, DB에만 있거나, 내용이 다른 레코드를 감지하면 감사 로그 `system.drift_detected`에 남기고 관리자 드리프트 탭에 표시한다.
 - **자동 삭제는 하지 않는다.**
+- `DNS_DRY_RUN=true`에서는 Cloudflare를 조회하지 않으므로 결과에 그 사실을 `error` 문구로 남긴다(모든 레코드가 DB에만 있음으로 나온다).
 
 `scheduled` 핸들러는 `controller.cron` 값으로 위 세 작업을 분기한다.
 
@@ -487,7 +516,8 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 
 - **단위**: `shared/rules.ts`의 모든 규칙
   - 이름 정규식, 예약어, 금칙어, IP 사설 대역 경계값, CNAME 정규화와 금지 대상, 레코드 구성 조합, Vercel TXT 값 형식
-- **통합** (vitest-pool-workers, D1 로컬, Cloudflare/Google API는 fetch mock):
+- **테스트 환경**: `vitest.config.ts`를 `vite.config.ts`와 분리한다(`cloudflare()` 플러그인 충돌 방지). Workers 런타임 테스트 패키지는 `@cloudflare/vitest-pool-workers`의 후속인 `@cloudflare/vitest-plugin`을 쓴다. 바인딩은 개인 `.dev.vars`와 무관하게 설정 파일에 고정하고, 각 테스트 파일 실행 전에 D1 마이그레이션을 적용한다.
+- **통합** (Workers 런타임, D1 로컬, Cloudflare/Google API는 fetch mock):
   - 로그인 허용/거부(도메인, `email_verified`, hd, 관리자 예외, 차단 사용자)
   - CSRF: Origin 누락, 다른 서브도메인 Origin, 토큰 불일치 → 403
   - 1인당 한도, 남의 lease 접근 → 404, 일반 사용자의 admin API 접근 → 403

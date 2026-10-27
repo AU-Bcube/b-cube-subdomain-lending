@@ -1,0 +1,1 @@
+- 매 작업마다 `docs/PROGRESS_REPORT.md`에 각 작업에 해당하는 진척을 업데이트하라.
