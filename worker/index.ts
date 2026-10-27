@@ -1,4 +1,5 @@
 import { getApp } from "./app";
+import { runScheduled } from "./cron";
 import { getConfig } from "./env";
 import { applySecurityHeaders } from "./middleware/security-headers";
 
@@ -32,9 +33,6 @@ export default {
       console.error("[config] scheduled 작업 중단:", err instanceof Error ? err.message : err);
       return;
     }
-    // TODO(M7): controller.cron 값으로 만료/헬스/드리프트 작업 분기
-    void config;
-    void ctx;
-    console.log("[cron] 미구현:", controller.cron);
+    ctx.waitUntil(runScheduled(controller.cron, env, config));
   },
 } satisfies ExportedHandler<Env>;
