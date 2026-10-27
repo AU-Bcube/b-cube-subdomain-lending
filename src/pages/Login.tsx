@@ -8,6 +8,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   hd_mismatch: "아주대학교 Google Workspace 계정으로 로그인해 주세요.",
   banned: "이용이 제한된 계정입니다. 운영진에게 문의하세요.",
   oauth_state: "로그인 요청이 만료되었거나 올바르지 않습니다. 다시 시도해 주세요.",
+  oauth_cancelled: "Google 로그인이 취소되었습니다.",
   oauth_failed: "Google 로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.",
   oauth_not_configured: "OAuth 미설정 — 개발용 로그인을 사용하세요.",
 };

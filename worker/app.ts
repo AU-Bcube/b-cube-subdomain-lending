@@ -5,7 +5,7 @@ import { csrf } from "./middleware/csrf";
 import { securityHeaders } from "./middleware/security-headers";
 import { sessionLoader } from "./middleware/session";
 import { authRoutes } from "./routes/auth";
-import { devApiRoutes, devAuthRoutes } from "./routes/dev";
+import { devApiRoutes, devAuthRoutes, devDebugRoutes } from "./routes/dev";
 import { meRoutes } from "./routes/me";
 import type { HonoEnv } from "./types";
 
@@ -35,6 +35,7 @@ export function createApp(config: Config): Hono<HonoEnv> {
   if (config.isDev) {
     app.route("/api/dev", devApiRoutes);
     if (config.devFakeLogin) app.route("/auth", devAuthRoutes);
+    if (config.devAuthDebug) app.route("/auth", devDebugRoutes);
   }
 
   app.notFound((c) => apiError(c, 404, "not_found", "요청한 경로를 찾을 수 없습니다."));
