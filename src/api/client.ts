@@ -1,7 +1,7 @@
 /**
  * fetch 래퍼. 상태 변경 요청에는 X-CSRF-Token을 자동으로 첨부한다 (SPEC §6.3).
  */
-import type { ApiErrorBody } from "../../shared/schemas";
+import type { ApiErrorBody, RecordFieldError } from "../../shared/schemas";
 
 let csrfToken: string | null = null;
 
@@ -14,6 +14,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** 레코드 검증 실패(invalid_records)일 때 항목별 오류 */
+    readonly errors?: RecordFieldError[],
   ) {
     super(message);
     this.name = "ApiError";
@@ -46,8 +48,8 @@ export async function api<T>(path: string, init: RequestInit & { json?: unknown 
   const text = await res.text();
   const data: unknown = text ? safeJson(text) : null;
   if (!res.ok) {
-    const err = (data as ApiErrorBody | null)?.error;
-    throw new ApiError(res.status, err?.code ?? "http_error", err?.message ?? `요청이 실패했습니다 (${res.status})`);
+    const err = (data as (ApiErrorBody & { error: { errors?: RecordFieldError[] } }) | null)?.error;
+    throw new ApiError(res.status, err?.code ?? "http_error", err?.message ?? `요청이 실패했습니다 (${res.status})`, err?.errors);
   }
   return data as T;
 }

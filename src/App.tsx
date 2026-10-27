@@ -3,7 +3,9 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppHeader } from "./components/AppHeader";
 import { LoginPage } from "./pages/Login";
+import { LeaseDetailPage } from "./pages/LeaseDetail";
 import { MyLeasesPage } from "./pages/MyLeases";
+import { NewLeasePage } from "./pages/NewLease";
 import { useSession } from "./session";
 
 function usePrefersDark(): boolean {
@@ -42,6 +44,22 @@ export function App() {
               element={
                 <RequireUser>
                   <MyLeasesPage />
+                </RequireUser>
+              }
+            />
+            <Route
+              path="/new"
+              element={
+                <RequireUser>
+                  <NewLeasePage />
+                </RequireUser>
+              }
+            />
+            <Route
+              path="/leases/:id"
+              element={
+                <RequireUser>
+                  <LeaseDetailPage />
                 </RequireUser>
               }
             />

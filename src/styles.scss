@@ -79,7 +79,208 @@ select {
   gap: 1rem;
 }
 
+.toast-area {
+  position: fixed;
+  top: calc(3rem + 0.5rem);
+  right: 1rem;
+  z-index: 9000;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  max-width: calc(100vw - 2rem);
+}
+
+// 좁은 화면에서는 표만 가로로 스크롤한다.
+.table-scroll {
+  overflow-x: auto;
+
+  .cds--data-table {
+    min-width: 48rem;
+  }
+}
+
+.cell-sub {
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--cds-text-secondary);
+}
+
+.inline-tag {
+  margin-left: 0.5rem;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
 .mono {
   font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.875rem;
+}
+
+// 사용자 화면 (내 서브도메인, 생성, 상세)
+.page-title-tight {
+  margin-top: 0.5rem;
+}
+
+.secondary {
+  color: var(--cds-text-secondary);
+}
+
+.break {
+  overflow-wrap: anywhere;
+}
+
+.empty-tile {
+  padding: 2rem;
+}
+
+.tooltip-trigger {
+  display: inline-block;
+}
+
+.limit-note {
+  padding: 0.5rem 1rem;
+  color: var(--cds-text-secondary);
+}
+
+.steps {
+  overflow-x: auto;
+}
+
+.kind-tile {
+  margin-bottom: 0.5rem;
+
+  .kind-desc {
+    margin-top: 0.25rem;
+    color: var(--cds-text-secondary);
+  }
+}
+
+.records-fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+
+.record-row {
+  display: grid;
+  grid-template-columns: 6rem minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: start;
+
+  &--txt {
+    grid-template-columns: minmax(0, 16rem) minmax(0, 1fr) auto;
+  }
+
+  .record-host {
+    padding-top: 0.75rem;
+    overflow-wrap: anywhere;
+  }
+}
+
+.inline-loading-btn {
+  padding: 0 1rem;
+  min-height: 3rem;
+}
+
+.table-scroll--narrow .cds--structured-list {
+  min-width: 32rem;
+}
+
+.detail-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.section-tile {
+  padding: 1.5rem;
+}
+
+.stack-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.guide-tile {
+  padding: 1.5rem;
+
+  ol {
+    margin-top: 0.75rem;
+  }
+
+  li {
+    margin-bottom: 0.5rem;
+  }
+
+  .guide-note {
+    margin-top: 0.75rem;
+    color: var(--cds-text-secondary);
+  }
+}
+
+.timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-left: 2px solid var(--cds-border-subtle);
+
+  li {
+    position: relative;
+    padding: 0 0 1rem 1rem;
+
+    &::before {
+      content: "";
+      position: absolute;
+      left: -5px;
+      top: 0.4rem;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--cds-interactive);
+    }
+  }
+
+  .timeline-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: baseline;
+  }
+
+  details {
+    margin-top: 0.25rem;
+  }
+
+  .json {
+    margin-top: 0.25rem;
+    padding: 0.5rem;
+    max-height: 16rem;
+    overflow: auto;
+    background: var(--cds-layer-01);
+    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-size: 0.75rem;
+  }
+}
+
+@media (max-width: 42rem) {
+  .record-row,
+  .record-row--txt {
+    grid-template-columns: minmax(0, 1fr) auto;
+
+    > :first-child {
+      grid-column: 1 / -1;
+    }
+  }
 }
