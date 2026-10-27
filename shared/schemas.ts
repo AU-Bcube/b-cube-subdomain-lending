@@ -83,6 +83,18 @@ export type ActorRole = "user" | "admin" | "system";
 // 관리자 API (SPEC §9)
 // ---------------------------------------------------------------------------
 
+export const reasonSchema = z.object({
+  reason: z.string().trim().min(1, "사유를 입력하세요.").max(500, "사유는 500자 이하로 입력하세요."),
+});
+export const optionalReasonSchema = z.object({ reason: z.string().trim().max(500).optional() });
+
+export interface Paged<T> {
+  items: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
 export interface RecordView {
   id: string;
   type: RecordType;
@@ -91,6 +103,64 @@ export interface RecordView {
   proxied: boolean;
   /** Cloudflare에 실제로 있는지 (cf_record_id가 있는지) */
   live: boolean;
+}
+
+export interface AdminLeaseItem {
+  id: string;
+  name: string;
+  ownerEmail: string;
+  targetKind: TargetKind;
+  status: LeaseStatus;
+  statusReason: string | null;
+  createdAt: number;
+  expiresAt: number;
+  endedAt: number | null;
+  healthFailCount: number;
+  lastHealthCheckAt: number | null;
+  records: RecordView[];
+}
+
+export interface AdminUserItem {
+  email: string;
+  name: string | null;
+  isAdmin: boolean;
+  firstLoginAt: number;
+  lastLoginAt: number;
+  bannedAt: number | null;
+  banReason: string | null;
+  /** active + suspended */
+  liveLeaseCount: number;
+  totalLeaseCount: number;
+}
+
+export interface AuditLogItem {
+  id: number;
+  at: number;
+  actorEmail: string | null;
+  actorRole: ActorRole;
+  action: AuditAction;
+  leaseId: string | null;
+  leaseName: string | null;
+  targetEmail: string | null;
+  detail: unknown;
+  ip: string | null;
+}
+
+export interface DriftItem {
+  kind: "cf_only" | "db_only" | "mismatch";
+  type: string;
+  host: string;
+  leaseId: string | null;
+  recordId: string | null;
+  cfRecordId: string | null;
+  dbContent: string | null;
+  cfContent: string | null;
+  dbProxied: boolean | null;
+  cfProxied: boolean | null;
+}
+
+export interface DriftResponse {
+  run: { id: number; at: number; ok: boolean; driftCount: number; items: DriftItem[]; error: string | null } | null;
 }
 
 export interface ApiErrorBody {

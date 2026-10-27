@@ -4,6 +4,7 @@ import { apiError } from "./lib/http";
 import { csrf } from "./middleware/csrf";
 import { securityHeaders } from "./middleware/security-headers";
 import { sessionLoader } from "./middleware/session";
+import { adminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
 import { devApiRoutes, devAuthRoutes, devDebugRoutes } from "./routes/dev";
 import { leaseRoutes, nameRoutes } from "./routes/leases";
@@ -33,6 +34,7 @@ export function createApp(config: Config): Hono<HonoEnv> {
   app.route("/api/me", meRoutes);
   app.route("/api/names", nameRoutes);
   app.route("/api/leases", leaseRoutes);
+  app.route("/api/admin", adminRoutes);
   app.route("/auth", authRoutes);
 
   if (config.isDev) {
