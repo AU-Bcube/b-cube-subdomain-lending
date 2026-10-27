@@ -2,13 +2,15 @@
  * 서버·클라이언트 공용 zod 스키마와 타입.
  */
 import { z } from "zod";
-import { MAX_TXT_LENGTH, TARGET_KINDS } from "./rules";
+import { MAX_TXT_LENGTH, TARGET_KINDS, type LeaseStatus, type RecordType, type TargetKind } from "./rules";
 
 export const meResponseSchema = z.object({
   email: z.string(),
   name: z.string().nullable(),
   isAdmin: z.boolean(),
   csrfToken: z.string(),
+  /** 서브도메인이 붙는 존 이름 (예: b-cube.kr) */
+  zone: z.string(),
   limits: z.object({ max: z.number().int(), used: z.number().int() }),
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;
@@ -77,6 +79,74 @@ export const AUDIT_ACTIONS = [
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type ActorRole = "user" | "admin" | "system";
 
+// ---------------------------------------------------------------------------
+// 관리자 API (SPEC §9)
+// ---------------------------------------------------------------------------
+
+export interface RecordView {
+  id: string;
+  type: RecordType;
+  host: string;
+  content: string;
+  proxied: boolean;
+  /** Cloudflare에 실제로 있는지 (cf_record_id가 있는지) */
+  live: boolean;
+}
+
 export interface ApiErrorBody {
   error: { code: string; message: string };
+}
+
+// ---------------------------------------------------------------------------
+// 사용자 lease API (SPEC §9)
+// ---------------------------------------------------------------------------
+
+export interface LeaseItem {
+  id: string;
+  name: string;
+  fqdn: string;
+  targetKind: TargetKind;
+  status: LeaseStatus;
+  statusReason: string | null;
+  createdAt: number;
+  expiresAt: number;
+  endedAt: number | null;
+  healthFailCount: number;
+  lastHealthCheckAt: number | null;
+  lastHealthOkAt: number | null;
+  lastHealthDetail: string | null;
+  /** 지금 연장할 수 있는지 (만료 RENEW_WINDOW_DAYS 이내) */
+  renewable: boolean;
+  records: RecordView[];
+}
+
+/** 소유자에게 보여주는 감사 로그. 작업자 이메일과 IP는 노출하지 않는다. */
+export interface LeaseAuditItem {
+  id: number;
+  at: number;
+  actorRole: ActorRole;
+  action: AuditAction;
+  detail: unknown;
+}
+
+export interface LeaseDetail extends LeaseItem {
+  auditLogs: LeaseAuditItem[];
+}
+
+export interface LeasesResponse {
+  items: LeaseItem[];
+  renewWindowDays: number;
+}
+
+export interface RecheckResponse {
+  ok: boolean;
+  detail: string;
+  reactivated: boolean;
+}
+
+/** 레코드 검증 실패 시 에러 본문에 붙는 항목별 오류 */
+export interface RecordFieldError {
+  index?: number;
+  code: string;
+  message: string;
 }

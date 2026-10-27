@@ -92,6 +92,7 @@ interface SeedLease {
   createdAt: number;
   expiresAt: number;
   endedAt?: number;
+  suspendedAt?: number;
   failCount?: number;
   lastCheck?: number | null;
   lastOk?: number | null;
@@ -142,6 +143,7 @@ const leases: SeedLease[] = [
     owner: member1,
     kind: "cname",
     status: "suspended",
+    suspendedAt: ago(2),
     statusReason: "health_check_failed",
     createdAt: ago(100),
     expiresAt: later(80),
@@ -367,7 +369,7 @@ for (const u of users) {
 
 for (const l of leases) {
   sql.push(
-    `INSERT INTO leases (id, name, owner_email, target_kind, status, status_reason, created_at, expires_at, ended_at, health_fail_count, last_health_check_at, last_health_ok_at, last_health_detail) VALUES (${[
+    `INSERT INTO leases (id, name, owner_email, target_kind, status, status_reason, created_at, expires_at, ended_at, suspended_at, health_fail_count, last_health_check_at, last_health_ok_at, last_health_detail) VALUES (${[
       l.id,
       l.name,
       l.owner,
@@ -377,6 +379,7 @@ for (const l of leases) {
       l.createdAt,
       l.expiresAt,
       l.endedAt ?? null,
+      l.suspendedAt ?? null,
       l.failCount ?? 0,
       l.lastCheck ?? null,
       l.lastOk ?? null,

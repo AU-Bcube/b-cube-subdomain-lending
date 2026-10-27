@@ -15,6 +15,7 @@ export const meRoutes = new Hono<HonoEnv>().get("/", requireUser, async (c) => {
     name: user.name,
     isAdmin: user.isAdmin,
     csrfToken: user.csrfToken,
+    zone: c.var.config.zoneName,
     limits: { max: c.var.config.maxLeasesPerUser, used: row?.used ?? 0 },
   };
   return c.json(body);

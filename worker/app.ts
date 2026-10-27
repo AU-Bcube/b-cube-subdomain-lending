@@ -6,6 +6,7 @@ import { securityHeaders } from "./middleware/security-headers";
 import { sessionLoader } from "./middleware/session";
 import { authRoutes } from "./routes/auth";
 import { devApiRoutes, devAuthRoutes, devDebugRoutes } from "./routes/dev";
+import { leaseRoutes, nameRoutes } from "./routes/leases";
 import { meRoutes } from "./routes/me";
 import type { HonoEnv } from "./types";
 
@@ -30,6 +31,8 @@ export function createApp(config: Config): Hono<HonoEnv> {
     return c.json({ status: "ok", time: new Date().toISOString() });
   });
   app.route("/api/me", meRoutes);
+  app.route("/api/names", nameRoutes);
+  app.route("/api/leases", leaseRoutes);
   app.route("/auth", authRoutes);
 
   if (config.isDev) {
