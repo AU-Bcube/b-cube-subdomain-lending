@@ -1,27 +1,8 @@
 import type { Context } from "hono";
+import type { ActorRole, AuditAction } from "../../shared/schemas";
 import { clientIp, userAgent } from "../lib/http";
 
-export const AUDIT_ACTIONS = [
-  "auth.login",
-  "auth.login_denied",
-  "auth.logout",
-  "lease.create",
-  "lease.update_records",
-  "lease.renew",
-  "lease.release",
-  "lease.recheck",
-  "lease.reactivate",
-  "system.health_fail",
-  "system.suspend",
-  "system.expire",
-  "admin.revoke",
-  "admin.ban",
-  "admin.unban",
-  "system.drift_detected",
-] as const;
-
-export type AuditAction = (typeof AUDIT_ACTIONS)[number];
-export type ActorRole = "user" | "admin" | "system";
+export { AUDIT_ACTIONS, type ActorRole, type AuditAction } from "../../shared/schemas";
 
 export interface AuditEntry {
   action: AuditAction;
