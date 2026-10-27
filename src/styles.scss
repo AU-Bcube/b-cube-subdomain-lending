@@ -90,6 +90,36 @@ select {
   max-width: calc(100vw - 2rem);
 }
 
+// 관리 화면
+.admin-panel {
+  padding: 1rem 0 0;
+}
+
+.admin-toolbar {
+  gap: 0.5rem;
+  align-items: center;
+
+  .cds--select--inline {
+    padding: 0 0.5rem;
+  }
+}
+
+.audit-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 1rem;
+  padding: 1rem;
+  background: var(--cds-layer-01);
+}
+
+.drift-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem;
+  flex-wrap: wrap;
+}
+
 // 좁은 화면에서는 표만 가로로 스크롤한다.
 .table-scroll {
   overflow-x: auto;
@@ -111,6 +141,33 @@ select {
 
 .nowrap {
   white-space: nowrap;
+}
+
+.record-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+
+  .record-type {
+    display: inline-block;
+    min-width: 3.5rem;
+    font-size: 0.75rem;
+    color: var(--cds-text-secondary);
+  }
+
+  .record-off {
+    text-decoration: line-through;
+    color: var(--cds-text-disabled);
+  }
+}
+
+.json-detail {
+  margin: 0;
+  padding: 0.5rem 0;
+  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-all;
 }
 
 .mono {

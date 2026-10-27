@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppHeader } from "./components/AppHeader";
 import { LoginPage } from "./pages/Login";
+import { AdminPage } from "./pages/admin/AdminPage";
 import { LeaseDetailPage } from "./pages/LeaseDetail";
 import { MyLeasesPage } from "./pages/MyLeases";
 import { NewLeasePage } from "./pages/NewLease";
@@ -23,6 +24,13 @@ function usePrefersDark(): boolean {
 function RequireUser({ children }: { children: ReactNode }) {
   const { me } = useSession();
   if (!me) return <Navigate to="/login" replace />;
+  return children;
+}
+
+function RequireAdmin({ children }: { children: ReactNode }) {
+  const { me } = useSession();
+  if (!me) return <Navigate to="/login" replace />;
+  if (!me.isAdmin) return <Navigate to="/" replace />;
   return children;
 }
 
@@ -61,6 +69,14 @@ export function App() {
                 <RequireUser>
                   <LeaseDetailPage />
                 </RequireUser>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <RequireAdmin>
+                  <AdminPage />
+                </RequireAdmin>
               }
             />
             <Route path="*" element={<Navigate to="/" replace />} />
