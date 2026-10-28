@@ -75,6 +75,7 @@ export const AUDIT_ACTIONS = [
   "admin.ban",
   "admin.unban",
   "system.drift_detected",
+  "system.dns_repair",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type ActorRole = "user" | "admin" | "system";

@@ -34,6 +34,7 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "admin.ban": "사용자 차단",
   "admin.unban": "차단 해제",
   "system.drift_detected": "드리프트 감지",
+  "system.dns_repair": "DNS 자동 복구",
 };
 
 export const ACTOR_ROLE_LABELS = { user: "회원", admin: "관리자", system: "시스템" } as const;

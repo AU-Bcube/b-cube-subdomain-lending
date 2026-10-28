@@ -1,6 +1,7 @@
 /**
  * lease 비즈니스 로직 (SPEC §8, §9).
- * 이 앱이 만든 레코드(DB에 cf_record_id가 있는 레코드)만 Cloudflare에서 조작한다.
+ * 이 앱이 만든 레코드(DB records의 cf_record_id 또는 dns_ops에 기록된 id)만 Cloudflare에서 조작한다.
+ * Cloudflare를 바꾸는 작업은 모두 dns_ops에 기록하고, DB 반영과 같은 batch에서 기록을 지운다(services/dns-ops.ts).
  */
 import {
   checkName,
@@ -21,6 +22,7 @@ import { RESERVED_NAMES } from "../data/reserved-names";
 import type { Config } from "../env";
 import { auditStatement, type AuditEntry } from "./audit";
 import type { DnsClient, DnsRecordData } from "./cloudflare-dns";
+import { beginOp, type DnsOp } from "./dns-ops";
 import { checkHealth, defaultHealthDeps, type HealthDeps, type HealthResult, type HealthTarget } from "./health";
 
 export interface LeaseRow {
@@ -138,10 +140,12 @@ export async function revokeLease(
     throw new LeaseStateError(`${lease.status} 상태의 lease는 회수할 수 없습니다.`);
   }
   const records = (await getRecordsByLease(db, [lease.id])).get(lease.id) ?? [];
+  const op = await beginOp(db, lease.id, "revoke");
   await removeFromCloudflare(db, dns, records);
 
   const now = Date.now();
   await db.batch([
+    op.finishStatement(),
     db
       .prepare(
         `UPDATE leases SET status = 'revoked', status_reason = ?, ended_at = ?
@@ -255,11 +259,11 @@ function sameRecord(row: RecordRow, rec: NormalizedRecord): boolean {
   return row.type === rec.type && row.host === rec.host && row.content === rec.content && (row.proxied === 1) === rec.proxied;
 }
 
-function toDnsData(rec: { type: RecordType; host: string; content: string; proxied: boolean }): DnsRecordData {
+export function toDnsData(rec: { type: RecordType; host: string; content: string; proxied: boolean }): DnsRecordData {
   return { type: rec.type, name: rec.host, content: rec.content, proxied: rec.proxied };
 }
 
-function rowToNormalized(row: RecordRow): NormalizedRecord {
+export function rowToNormalized(row: RecordRow): NormalizedRecord {
   return { type: row.type, host: row.host, content: row.content, proxied: row.proxied === 1 };
 }
 
@@ -268,8 +272,8 @@ interface AppliedRecordSet {
   statements: D1PreparedStatement[];
   /** DB 반영 후 Cloudflare에서 지울 기존 레코드 */
   toRemove: RecordRow[];
-  /** DB 반영이 실패했을 때 Cloudflare 변경을 되돌린다 */
-  rollback: () => Promise<void>;
+  /** DB 반영이 실패했을 때 Cloudflare 변경을 되돌린다. 모두 되돌렸으면 true */
+  rollback: () => Promise<boolean>;
 }
 
 /**
@@ -278,7 +282,8 @@ interface AppliedRecordSet {
  *
  * - 내용이 같은 레코드는 그대로 둔다.
  * - CNAME은 같은 host에 둘 이상 존재할 수 없어 "생성 후 삭제"가 불가능하므로 기존 레코드를 PATCH한다.
- * - 생성·수정 도중 실패하면 이미 한 변경을 되돌리고 DnsError를 다시 던진다.
+ * - 생성·수정 도중 실패하면 이미 한 변경을 되돌리고 DnsError를 다시 던진다. 모두 되돌렸으면 작업 기록도 지운다.
+ * - 만든 레코드 id는 바로 작업 기록(op)에 남긴다.
  */
 export async function applyRecordSet(
   db: D1Database,
@@ -286,6 +291,7 @@ export async function applyRecordSet(
   leaseId: string,
   oldRows: readonly RecordRow[],
   next: readonly NormalizedRecord[],
+  op: DnsOp,
   now = Date.now(),
 ): Promise<AppliedRecordSet> {
   const remaining = oldRows.filter((r) => r.cf_record_id !== null);
@@ -312,14 +318,20 @@ export async function applyRecordSet(
   const created: Array<{ cfId: string; rec: NormalizedRecord }> = [];
   const updated: Array<{ old: RecordRow; rec: NormalizedRecord }> = [];
   const rollback = async () => {
+    let clean = true;
     for (const c of created) {
-      await dns.remove(c.cfId).catch((err) => console.error("[lease] 롤백: 생성한 레코드 삭제 실패", c.cfId, err));
+      await dns.remove(c.cfId).catch((err) => {
+        clean = false;
+        console.error("[lease] 롤백: 생성한 레코드 삭제 실패", c.cfId, err);
+      });
     }
     for (const u of updated) {
-      await dns
-        .update(u.old.cf_record_id!, toDnsData(rowToNormalized(u.old)), leaseId)
-        .catch((err) => console.error("[lease] 롤백: 수정한 레코드 복구 실패", u.old.cf_record_id, err));
+      await dns.update(u.old.cf_record_id!, toDnsData(rowToNormalized(u.old)), leaseId).catch((err) => {
+        clean = false;
+        console.error("[lease] 롤백: 수정한 레코드 복구 실패", u.old.cf_record_id, err);
+      });
     }
+    return clean;
   };
 
   try {
@@ -328,11 +340,13 @@ export async function applyRecordSet(
         await dns.update(step.old.cf_record_id!, toDnsData(step.rec), leaseId);
         updated.push({ old: step.old, rec: step.rec });
       } else {
-        created.push({ cfId: await dns.create(toDnsData(step.rec), leaseId), rec: step.rec });
+        const cfId = await dns.create(toDnsData(step.rec), leaseId);
+        created.push({ cfId, rec: step.rec });
+        await op.track(cfId);
       }
     }
   } catch (err) {
-    await rollback();
+    if (await rollback()) await op.finish();
     throw err;
   }
 
@@ -357,11 +371,19 @@ export async function applyRecordSet(
   return { statements, toRemove: dropped.filter((r) => r.cf_record_id !== null), rollback };
 }
 
-/** DB 반영 후 기존 레코드 삭제. 실패해도 작업은 성공으로 두고, 남은 레코드는 드리프트 점검이 감지한다. */
-async function removeStale(dns: DnsClient, rows: readonly RecordRow[]): Promise<void> {
+/**
+ * DB 반영 후 기존 레코드 삭제. 실패해도 작업은 성공으로 둔다.
+ * 남은 레코드는 작업 기록에 id가 있으므로 매시 cron 복구가 지운다. 모두 지웠으면 true.
+ */
+async function removeStale(dns: DnsClient, rows: readonly RecordRow[]): Promise<boolean> {
+  let clean = true;
   for (const row of rows) {
-    await dns.remove(row.cf_record_id!).catch((err) => console.error("[lease] 기존 레코드 삭제 실패(드리프트로 남음)", row.cf_record_id, err));
+    await dns.remove(row.cf_record_id!).catch((err) => {
+      clean = false;
+      console.error("[lease] 기존 레코드 삭제 실패(cron 복구 대상)", row.cf_record_id, err);
+    });
   }
+  return clean;
 }
 
 function auditOf(actor: Actor, entry: Omit<AuditEntry, "actorEmail" | "actorRole" | "ip" | "userAgent">): AuditEntry {
@@ -405,9 +427,11 @@ export async function createLease(
     last_health_ok_at: null,
     last_health_detail: null,
   };
-  const applied = await applyRecordSet(db, dns, id, [], records, now);
+  const op = await beginOp(db, id, "create", now);
+  const applied = await applyRecordSet(db, dns, id, [], records, op, now);
   try {
     await db.batch([
+      op.finishStatement(),
       db
         .prepare(
           `INSERT INTO leases (id, name, owner_email, target_kind, status, created_at, expires_at)
@@ -424,7 +448,7 @@ export async function createLease(
       })),
     ]);
   } catch (err) {
-    await applied.rollback();
+    if (await applied.rollback()) await op.finish();
     // 동시에 같은 이름이 생성된 경우 uq_leases_name_live 위반
     if (String(err).includes("UNIQUE")) throw new LeaseError(409, "taken", NAME_REASON_MESSAGES.taken);
     throw err;
@@ -446,10 +470,16 @@ export async function replaceLeaseRecords(
   const next = validateOrThrow(lease.name, config, lease.target_kind, inputRecords);
   const oldRows = (await getRecordsByLease(db, [lease.id])).get(lease.id) ?? [];
   const now = Date.now();
-  const applied = await applyRecordSet(db, dns, lease.id, oldRows, next, now);
-  if (applied.statements.length === 0) return { changed: false };
+  const op = await beginOp(db, lease.id, "replace", now);
+  const applied = await applyRecordSet(db, dns, lease.id, oldRows, next, op, now);
+  if (applied.statements.length === 0) {
+    await op.finish();
+    return { changed: false };
+  }
   try {
     await db.batch([
+      // 반영 후에는 지울 기존 레코드만 기록에 남긴다(새 레코드는 records가 참조한다).
+      op.setIdsStatement(applied.toRemove.map((r) => r.cf_record_id!)),
       ...applied.statements,
       auditStatement(db, auditOf(actor, {
         action: "lease.update_records",
@@ -460,10 +490,10 @@ export async function replaceLeaseRecords(
       })),
     ]);
   } catch (err) {
-    await applied.rollback();
+    if (await applied.rollback()) await op.finish();
     throw err;
   }
-  await removeStale(dns, applied.toRemove);
+  if (await removeStale(dns, applied.toRemove)) await op.finish();
   return { changed: true };
 }
 
@@ -494,9 +524,11 @@ export async function renewLease(db: D1Database, config: Config, lease: LeaseRow
 export async function releaseLease(db: D1Database, dns: DnsClient, lease: LeaseRow, actor: Actor): Promise<void> {
   if (!LIVE_STATUSES.includes(lease.status)) throw new LeaseStateError("이미 종료된 서브도메인입니다.");
   const records = (await getRecordsByLease(db, [lease.id])).get(lease.id) ?? [];
+  const op = await beginOp(db, lease.id, "release");
   await removeFromCloudflare(db, dns, records);
   const now = Date.now();
   await db.batch([
+    op.finishStatement(),
     db
       .prepare(`UPDATE leases SET status = 'released', status_reason = NULL, ended_at = ? WHERE id = ? AND status IN ('active','suspended')`)
       .bind(now, lease.id),
@@ -556,16 +588,32 @@ export async function recheckLease(
   }
 
   // 재활성화: 레코드 재생성 → DB 반영. 실패하면 생성한 레코드를 지운다.
+  const op = await beginOp(db, lease.id, "reactivate", now);
   const created: Array<{ row: RecordRow; cfId: string }> = [];
+  const undo = async () => {
+    let clean = true;
+    for (const c of created) {
+      await dns.remove(c.cfId).catch((err) => {
+        clean = false;
+        console.error("[lease] 재활성화 롤백: 생성한 레코드 삭제 실패", c.cfId, err);
+      });
+    }
+    return clean;
+  };
   try {
-    for (const row of records) created.push({ row, cfId: await dns.create(toDnsData(rowToNormalized(row)), lease.id) });
+    for (const row of records) {
+      const cfId = await dns.create(toDnsData(rowToNormalized(row)), lease.id);
+      created.push({ row, cfId });
+      await op.track(cfId);
+    }
   } catch (err) {
-    for (const c of created) await dns.remove(c.cfId).catch(() => {});
-    await db.batch([healthUpdate, recheckAudit]);
+    const clean = await undo();
+    await db.batch([healthUpdate, recheckAudit, ...(clean ? [op.finishStatement()] : [])]);
     throw err;
   }
   try {
     await db.batch([
+      op.finishStatement(),
       healthUpdate,
       ...created.map((c) => db.prepare(`UPDATE records SET cf_record_id = ?, updated_at = ? WHERE id = ?`).bind(c.cfId, now, c.row.id)),
       db
@@ -581,7 +629,7 @@ export async function recheckLease(
       })),
     ]);
   } catch (err) {
-    for (const c of created) await dns.remove(c.cfId).catch(() => {});
+    if (await undo()) await op.finish();
     throw err;
   }
   return { result, reactivated: true };
@@ -596,8 +644,10 @@ const SYSTEM: Actor = { email: null, role: "system" };
 /** 헬스체크 실패 누적으로 suspend: Cloudflare 레코드 삭제, DB records 유지(cf_record_id NULL) */
 export async function suspendLease(db: D1Database, dns: DnsClient, lease: LeaseRow, failCount: number, now = Date.now()): Promise<void> {
   const records = (await getRecordsByLease(db, [lease.id])).get(lease.id) ?? [];
+  const op = await beginOp(db, lease.id, "suspend", now);
   await removeFromCloudflare(db, dns, records);
   await db.batch([
+    op.finishStatement(),
     db
       .prepare(
         `UPDATE leases SET status = 'suspended', status_reason = 'health_check_failed', suspended_at = ? WHERE id = ? AND status = 'active'`,
@@ -616,8 +666,10 @@ export async function suspendLease(db: D1Database, dns: DnsClient, lease: LeaseR
 /** 만료: (남은) Cloudflare 레코드 삭제 → status `expired` */
 export async function expireLease(db: D1Database, dns: DnsClient, lease: LeaseRow, cause: string, now = Date.now()): Promise<void> {
   const records = (await getRecordsByLease(db, [lease.id])).get(lease.id) ?? [];
+  const op = await beginOp(db, lease.id, "expire", now);
   await removeFromCloudflare(db, dns, records);
   await db.batch([
+    op.finishStatement(),
     db
       .prepare(`UPDATE leases SET status = 'expired', status_reason = ?, ended_at = ? WHERE id = ? AND status IN ('active','suspended')`)
       .bind(cause, now, lease.id),
