@@ -9,6 +9,7 @@ import {
   type AdminUserItem,
   type AuditLogItem,
   type DriftItem,
+  type DriftRepairSummary,
   type DriftResponse,
   type Paged,
 } from "../../shared/schemas";
@@ -16,6 +17,7 @@ import { apiError } from "../lib/http";
 import { requireAdmin, requireUser } from "../middleware/auth";
 import { auditStatement, requestMeta, writeAudit } from "../services/audit";
 import { createDnsClient, DnsError } from "../services/cloudflare-dns";
+import type { DnsOpRow } from "../services/dns-ops";
 import {
   getLease,
   getRecordsByLease,
@@ -345,16 +347,19 @@ export const adminRoutes = new Hono<HonoEnv>()
     return c.json(body);
   })
 
-  // 최근 reconcile 결과
+  // 최근 reconcile 결과와 끝나지 않은 DNS 작업 기록
   .get("/drift", async (c) => {
-    const row = await c.env.DB.prepare(`SELECT * FROM reconcile_runs ORDER BY at DESC, id DESC LIMIT 1`).first<{
+    const db = c.env.DB;
+    const row = await db.prepare(`SELECT * FROM reconcile_runs ORDER BY at DESC, id DESC LIMIT 1`).first<{
       id: number;
       at: number;
       ok: number;
       drift_count: number;
       items: string;
       error: string | null;
+      repaired: string | null;
     }>();
+    const { results: ops } = await db.prepare(`SELECT * FROM dns_ops ORDER BY started_at LIMIT 100`).all<DnsOpRow>();
     const body: DriftResponse = {
       run: row
         ? {
@@ -364,8 +369,17 @@ export const adminRoutes = new Hono<HonoEnv>()
             driftCount: row.drift_count,
             items: (parseDetail(row.items) as DriftItem[] | null) ?? [],
             error: row.error,
+            repaired: row.repaired ? (parseDetail(row.repaired) as DriftRepairSummary | null) : null,
           }
         : null,
+      pendingOps: ops.map((op) => ({
+        id: op.id,
+        leaseId: op.lease_id,
+        kind: op.kind,
+        startedAt: op.started_at,
+        attempts: op.attempts,
+        lastError: op.last_error,
+      })),
     };
     return c.json(body);
   });

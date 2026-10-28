@@ -160,8 +160,36 @@ export interface DriftItem {
   cfProxied: boolean | null;
 }
 
+/** 드리프트 점검의 자동 복구 결과 */
+export interface DriftRepairSummary {
+  /** 복구한 작업 기록(dns_ops) 수 */
+  opsRecovered: number;
+  /** 실제로 Cloudflare를 바꾼 lease별 결과 */
+  leases: Array<{ leaseId: string; removed: number; recreated: number; restored: number }>;
+  failed: number;
+}
+
+/** 아직 끝나지 않은 DNS 작업 기록 */
+export interface PendingDnsOp {
+  id: string;
+  leaseId: string;
+  kind: string;
+  startedAt: number;
+  attempts: number;
+  lastError: string | null;
+}
+
 export interface DriftResponse {
-  run: { id: number; at: number; ok: boolean; driftCount: number; items: DriftItem[]; error: string | null } | null;
+  run: {
+    id: number;
+    at: number;
+    ok: boolean;
+    driftCount: number;
+    items: DriftItem[];
+    error: string | null;
+    repaired: DriftRepairSummary | null;
+  } | null;
+  pendingOps: PendingDnsOp[];
 }
 
 export interface ApiErrorBody {
