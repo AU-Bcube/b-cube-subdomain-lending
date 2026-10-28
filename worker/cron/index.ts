@@ -8,7 +8,7 @@ import { purgeExpiredSessions } from "./sessions";
 /** wrangler.jsonc triggers.crons와 같은 값 (SPEC §10) */
 export const CRON_HEALTH = "17 * * * *";
 export const CRON_DAILY = "0 18 * * *";
-export const CRON_DRIFT = "30 18 * * 0";
+export const CRON_DRIFT = "30 18 * * SUN";
 
 /** scheduled 핸들러: controller.cron 값으로 작업을 분기한다. */
 export async function runScheduled(cron: string, env: Env, config: Config): Promise<void> {
