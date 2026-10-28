@@ -380,7 +380,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
   - IP 형태는 금지한다.
   - `b-cube.kr`이나 그 하위 도메인을 가리키는 것은 금지한다. 회원 간 체인과 탈취 연쇄를 막기 위해서다.
   - 끝의 점은 정규화해서 제거한다.
-- **proxied**: 기본값은 false다. `ip` 타입의 A/AAAA에서만 사용자가 켤 수 있다. Vercel과 CNAME은 항상 false로 강제한다. TXT는 항상 false다.
+- **proxied**: 사용자 입력과 무관하게 서버가 강제한다. A/AAAA/CNAME은 모든 연결 대상(vercel, ip, cname)에서 항상 true(Cloudflare 프록시)다. TXT는 프록시할 수 없으므로 항상 false다.
 - TTL은 Cloudflare 자동값(1)으로 고정한다.
 
 ## 8. Cloudflare DNS 서비스 (`services/cloudflare-dns.ts`)
@@ -501,7 +501,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 3. **새 서브도메인** (`/new`): `ProgressIndicator` 4단계
    1. 이름: `TextInput` + 300ms 디바운스로 가용성 조회, 결과는 `invalid`/`helperText`로 표시
    2. 연결 대상: `RadioTile` 3종 (Vercel / 서버 IP(AWS 등) / 기타 CNAME). 각각 짧은 설명 포함
-   3. 레코드 입력: 대상별 폼. Vercel은 CNAME 값이 미리 채워지고 검증 TXT 입력란은 선택. IP는 A/AAAA 동적 추가. 프록시 `Toggle`은 IP일 때만 노출
+   3. 레코드 입력: 대상별 폼. Vercel은 CNAME 값이 미리 채워지고 검증 TXT 입력란은 선택. IP는 A/AAAA 동적 추가. 프록시는 서버가 강제하므로(§7.2) 토글을 두지 않고 안내 문구만 보여준다
    4. 확인: 생성될 레코드 미리보기(`StructuredList`) → 생성
    - 생성 후 대상별 **연결 가이드**를 표시한다. 예: Vercel 프로젝트 → Settings → Domains에서 `alice.b-cube.kr` 추가
 4. **상세** (`/leases/:id`): 레코드 목록, 편집 폼(위 3단계 재사용), 헬스 상태, 이 lease의 감사 로그 타임라인

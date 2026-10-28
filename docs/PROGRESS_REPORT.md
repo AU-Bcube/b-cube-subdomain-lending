@@ -83,7 +83,7 @@
 | 3.5 | A/AAAA 공인 IP 검사 (사설·예약 대역 거부) | §7.2 | 완료 | IPv4/IPv6 파서와 CIDR 비교 직접 구현 |
 | 3.6 | CNAME 값 검증 (FQDN, IP 금지, 존 하위 금지, 끝 점 제거) | §7.2 | 완료 | `checkCnameTarget()` |
 | 3.7 | Vercel 검증 TXT 형식 (`vc-domain-verify=<fqdn>,`) | §7.2 | 완료 | 3절 확인 결과 참고 |
-| 3.8 | TXT 개수(5)·길이(512)·ASCII, proxied 강제 규칙, TTL 1 | §7.2 | 완료 | proxied는 ip 타입 A/AAAA 외에는 false로 강제 |
+| 3.8 | TXT 개수(5)·길이(512)·ASCII, proxied 강제 규칙, TTL 1 | §7.2 | 완료 | proxied는 A/AAAA/CNAME이면 연결 대상과 무관하게 true, TXT는 false로 강제 (2026-10-28 변경: 이전에는 ip 타입 A/AAAA만 사용자 선택). 사용자 화면의 프록시 토글은 제거 |
 | 3.9 | lease 입력 zod 스키마 (`shared/schemas.ts`) | §9, §11 | 완료 | `createLeaseSchema`, `replaceRecordsSchema`, `nameAvailabilitySchema`. 형태만 검사하고 규칙은 `rules.ts`가 검사 |
 | 3.10 | 단위 테스트 (경계값 포함) | §12 | 완료 | `test/rules.test.ts` 169건 통과. 이름 보류 규칙(`checkNameHold()`)도 순수 함수로 분리해 함께 검증 |
 
@@ -193,6 +193,7 @@
 | 운영 500 로그에 오류 메시지가 빠짐 | 2.x | 해결 (2026-10-28). `app.onError`가 `err.message`와 `cause`를 따로 남김 (`worker/app.ts`) |
 | 빌드 경고 "Some chunks are larger than 500 kB" (JS 단일 청크 650kB) | 5.x | 해결 (2026-10-28). 새 서브도메인·상세·관리 화면을 `React.lazy`로 분리, react·carbon 라이브러리 청크 분리(`vite.config.ts`). 최대 청크 258kB. CSS(1.4MB, gzip 217kB)는 Carbon 전체 스타일이라 그대로 |
 | 테스트가 `wrangler.jsonc`의 운영 `REQUIRE_HD=true`에 영향받음 | 2.x | 해결 (2026-10-28). `vitest.config.ts` 바인딩에 `REQUIRE_HD`, `EXTRA_RESERVED_NAMES` 고정 |
+| 모든 A/AAAA/CNAME을 프록시로 등록한 뒤 실제 동작 | 3.8 | 미확인 (2026-10-28 변경). Vercel이 프록시 뒤에서 인증서를 발급하는지, 헬스체크(`https://<fqdn>/` 요청과 벤더 시그니처)가 프록시를 거쳐도 맞게 판정하는지 배포 후 확인 필요. 변경 전에 만든 레코드는 proxied=false 그대로이고, 소유자가 레코드를 편집하면 그때 프록시로 바뀐다 |
 | 실제 Google 계정 로그인과 `hd` 클레임 (체크리스트 7번) | 2.1, 2.2, 2.8 | 미확인. 사용자가 브라우저에서 직접 로그인해야 한다. 로컬 `/auth/login`이 Google로 올바른 파라미터(PKCE, `redirect_uri=http://localhost:5173/auth/callback`)와 함께 리다이렉트하는 것까지 확인 (2026-10-27) |
 
 ## 4. SPEC과 다른 점
@@ -222,6 +223,7 @@
 | 2026-10-28: 코드 표시 폰트 D2Coding (jsDelivr) | 디자인 |
 | 2026-10-28: 폰트를 jsDelivr CDN에서 불러오고 CSP에 `cdn.jsdelivr.net` 추가 | §6.4, 디자인 |
 | 2026-10-28: 드리프트 cron 요일을 `0`에서 `SUN`으로 변경 (Cloudflare cron은 요일 `0`을 받지 않음) | §4, §10.3 |
+| 2026-10-28: A/AAAA/CNAME 레코드는 연결 대상과 무관하게 Cloudflare 프록시(proxied=true) 강제, TXT는 false. 사용자 화면의 프록시 토글 제거, 연결 가이드와 수동 체크리스트 문구 수정 | §7.2, §11 |
 
 ## 5. 다음 작업
 
