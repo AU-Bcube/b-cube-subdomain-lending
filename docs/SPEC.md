@@ -318,8 +318,8 @@ CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
 
 ### 6.4 보안 헤더 (모든 응답)
 
-- `Content-Security-Policy`: `default-src 'self'; img-src 'self' data: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline'; font-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com`
-  - Carbon과 폰트를 셀프 호스팅하는 기준이다. 필요하면 조정하고 보고한다.
+- `Content-Security-Policy`: `default-src 'self'; img-src 'self' data: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com`
+  - Carbon은 셀프 호스팅, 폰트는 jsDelivr CDN(`cdn.jsdelivr.net`)에서 불러오는 기준이다. 필요하면 조정하고 보고한다.
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 - API 응답에는 `Cache-Control: no-store`를 붙인다.
 
@@ -487,7 +487,8 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 
 - 패키지: `@carbon/react`, `@carbon/styles`, `@carbon/icons-react`
 - 테마: 기본 `g10`, `prefers-color-scheme: dark`이면 `g100` (`<Theme>` 사용)
-- 폰트: IBM Plex Sans KR (`@fontsource` 등으로 셀프 호스팅)
+- 폰트: IBM Plex Sans KR. `index.html`에서 jsDelivr의 `@fontsource/ibm-plex-sans-kr@5.3.0`(버전 고정)을 불러온다. 한국에서 jsDelivr는 Cloudflare 서울 엣지로 응답해 Google Fonts(`fonts.gstatic.com`)보다 빠르다(2026-10-28 측정: woff2 응답 약 35ms 대 170ms)
+- 코드 표시 폰트: D2Coding. `index.html`에서 jsDelivr의 `d2coding@1.3.2` subset(KS X 1001 한글 2,350자, woff2 약 350kB)을 불러온다
 - 레이아웃: **UI Shell** `Header`(이름 "B-CUBE Domain"), `HeaderNavigation`(내 서브도메인 / 관리자는 "관리"), `HeaderGlobalAction`(로그아웃). 본문은 `Grid`/`Column`.
 - 모바일 폭에서도 사용 가능해야 한다.
 
