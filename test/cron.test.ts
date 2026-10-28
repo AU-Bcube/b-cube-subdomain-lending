@@ -51,7 +51,7 @@ import { parseConfig } from "../worker/env";
 import { createDnsClient, type CfDnsRecord, type DnsClient } from "../worker/services/cloudflare-dns";
 import { checkHealth, detectUnclaimed, DOH_URL, ipProbe, type HealthDeps } from "../worker/services/health";
 import type { RecordRow } from "../worker/services/leases";
-import { auditFor, createLease } from "./helpers";
+import { auditFor, createLease, fakeCloudflare, LIVE_DNS } from "./helpers";
 
 const DAY = 24 * 60 * 60 * 1000;
 const ZONE = "b-cube.kr";
@@ -295,32 +295,57 @@ describe("cron: 드리프트 점검", () => {
     expect(normalizeContent("CNAME", "Cname.Vercel-DNS.com.")).toBe("cname.vercel-dns.com");
   });
 
-  it("결과를 reconcile_runs에 저장하고 드리프트가 있으면 감사 로그, 자동 삭제는 하지 않는다", async () => {
-    const leaseId = await createLease({ name: `dr-${uid()}`, owner: `dr-${uid()}@ajou.ac.kr`, records: [{ type: "A", host: `d.${ZONE}`, content: "3.3.3.3", cfRecordId: `cf-${uid()}` }] });
-    const dns: DnsClient = {
-      dryRun: false,
-      listByName: async () => [],
-      listManaged: async () => [cfRec({ id: "cf-orphan", comment: "bcd:lease=deleted" })],
-      create: vi.fn(),
-      update: vi.fn(),
-      remove: vi.fn(),
-    };
+  it("안전한 드리프트는 자동 복구하고, Cloudflare에만 있는 레코드는 보고만 한다", async () => {
+    const cf = fakeCloudflare(vi.spyOn(globalThis, "fetch"));
+    const dns = createDnsClient(parseConfig({ ...env, ...LIVE_DNS } as unknown as Env));
+    const owner = `dr-${uid()}@ajou.ac.kr`;
+    const put = (id: string, content: string, leaseId: string) =>
+      cf.records.set(id, { id, type: "A", name: `d.${ZONE}`, content, proxied: false, comment: `bcd:lease=${leaseId}` });
+
+    // DB에만 있음(대시보드에서 삭제) → 다시 만든다
+    const gone = await createLease({ name: `dr-${uid()}`, owner, records: [{ type: "A", host: `d.${ZONE}`, content: "3.3.3.3", cfRecordId: "cf-gone" }] });
+    // 내용 다름(대시보드에서 수정) → DB 값으로 되돌린다
+    const edited = await createLease({ name: `dr-${uid()}`, owner, records: [{ type: "A", host: `d.${ZONE}`, content: "3.3.3.3", cfRecordId: "cf-edited" }] });
+    put("cf-edited", "9.9.9.9", edited);
+    // 종료된 lease가 아직 참조하는 레코드 → 지운다
+    const ended = await createLease({ name: `dr-${uid()}`, owner, status: "released", endedAt: Date.now(), records: [{ type: "A", host: `d.${ZONE}`, content: "3.3.3.3", cfRecordId: "cf-ended" }] });
+    put("cf-ended", "3.3.3.3", ended);
+    // comment만 있고 DB에 근거가 없는 레코드 → 건드리지 않는다
+    put("cf-orphan", "1.1.1.1", "deleted");
+
     const at = Date.now() + 5 * 365 * DAY;
     const r = await runReconcile(env.DB, dns, at);
     expect(r.ok).toBe(true);
-    const run = await env.DB.prepare(`SELECT * FROM reconcile_runs WHERE at = ?`).bind(at).first<{ ok: number; drift_count: number; items: string }>();
-    const items = JSON.parse(run!.items) as Array<{ kind: string; leaseId: string | null }>;
-    expect(items).toContainEqual(expect.objectContaining({ kind: "cf_only", leaseId: "deleted" }));
-    expect(items).toContainEqual(expect.objectContaining({ kind: "db_only", leaseId }));
-    expect(run!.drift_count).toBe(items.length);
-    expect(dns.remove).not.toHaveBeenCalled();
-    expect(dns.create).not.toHaveBeenCalled();
 
-    const { results } = await env.DB.prepare(`SELECT detail FROM audit_logs WHERE action = 'system.drift_detected' AND at = ?`).bind(at).all<{ detail: string }>();
-    expect(JSON.parse(results[0]!.detail)).toMatchObject({ count: items.length, cf_only: 1 });
+    const goneRow = (await env.DB.prepare(`SELECT cf_record_id FROM records WHERE lease_id = ?`).bind(gone).first<{ cf_record_id: string }>())!;
+    expect(cf.records.get(goneRow.cf_record_id)).toMatchObject({ content: "3.3.3.3", comment: `bcd:lease=${gone}` });
+    expect(cf.records.get("cf-edited")?.content).toBe("3.3.3.3");
+    expect(cf.records.has("cf-ended")).toBe(false);
+    expect(await env.DB.prepare(`SELECT cf_record_id FROM records WHERE lease_id = ?`).bind(ended).first()).toEqual({ cf_record_id: null });
+    expect(cf.records.has("cf-orphan")).toBe(true);
+    expect(cf.calls).not.toContain("DELETE cf-orphan");
+
+    const run = await env.DB.prepare(`SELECT * FROM reconcile_runs WHERE at = ?`).bind(at).first<{ drift_count: number; items: string; repaired: string }>();
+    const items = JSON.parse(run!.items) as Array<{ kind: string; leaseId: string | null }>;
+    // 복구 후 다시 비교한 결과만 남는다
+    expect(items).toEqual([expect.objectContaining({ kind: "cf_only", leaseId: "deleted" })]);
+    expect(run!.drift_count).toBe(1);
+    const repaired = JSON.parse(run!.repaired) as { leases: Array<{ leaseId: string }> };
+    expect(repaired.leases.map((l) => l.leaseId)).toEqual(expect.arrayContaining([gone, edited, ended]));
+    expect(await auditFor({ action: "system.dns_repair", leaseId: gone })).toEqual([
+      expect.objectContaining({ actor_role: "system", detail: expect.objectContaining({ recreated: 1 }) }),
+    ]);
 
     const drift = await (await call("/api/admin/drift", { session: await login("t-admin@ajou.ac.kr") })).json();
-    expect(drift).toMatchObject({ run: { at, ok: true, driftCount: items.length } });
+    expect(drift).toMatchObject({ run: { at, ok: true, driftCount: 1, repaired: { failed: 0 } }, pendingOps: expect.any(Array) });
+  });
+
+  it("dry-run에서는 자동 복구하지 않는다", async () => {
+    await createLease({ name: `dd-${uid()}`, owner: `dd-${uid()}@ajou.ac.kr`, records: [{ type: "A", host: `d.${ZONE}`, content: "3.3.3.3" }] });
+    const at = Date.now() + 5 * 365 * DAY + 1;
+    await runReconcile(env.DB, dryDns(), at);
+    const run = await env.DB.prepare(`SELECT repaired, error FROM reconcile_runs WHERE at = ?`).bind(at).first();
+    expect(run).toMatchObject({ repaired: null, error: expect.stringContaining("DNS_DRY_RUN") });
   });
 
   it("Cloudflare 조회 실패도 기록한다 (ok=0)", async () => {

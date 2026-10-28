@@ -75,6 +75,7 @@ export const AUDIT_ACTIONS = [
   "admin.ban",
   "admin.unban",
   "system.drift_detected",
+  "system.dns_repair",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type ActorRole = "user" | "admin" | "system";
@@ -159,8 +160,36 @@ export interface DriftItem {
   cfProxied: boolean | null;
 }
 
+/** 드리프트 점검의 자동 복구 결과 */
+export interface DriftRepairSummary {
+  /** 복구한 작업 기록(dns_ops) 수 */
+  opsRecovered: number;
+  /** 실제로 Cloudflare를 바꾼 lease별 결과 */
+  leases: Array<{ leaseId: string; removed: number; recreated: number; restored: number }>;
+  failed: number;
+}
+
+/** 아직 끝나지 않은 DNS 작업 기록 */
+export interface PendingDnsOp {
+  id: string;
+  leaseId: string;
+  kind: string;
+  startedAt: number;
+  attempts: number;
+  lastError: string | null;
+}
+
 export interface DriftResponse {
-  run: { id: number; at: number; ok: boolean; driftCount: number; items: DriftItem[]; error: string | null } | null;
+  run: {
+    id: number;
+    at: number;
+    ok: boolean;
+    driftCount: number;
+    items: DriftItem[];
+    error: string | null;
+    repaired: DriftRepairSummary | null;
+  } | null;
+  pendingOps: PendingDnsOp[];
 }
 
 export interface ApiErrorBody {
@@ -199,8 +228,20 @@ export interface LeaseAuditItem {
   detail: unknown;
 }
 
+/** 상세 화면의 Cloudflare 실제 상태 (DB 값과 비교) */
+export interface LeaseDnsState {
+  /** Cloudflare를 조회했는지. dry-run, active가 아님, 조회 실패면 false */
+  checked: boolean;
+  reason: "dry_run" | "not_active" | "error" | null;
+  /** DB 값과 다른 레코드 */
+  items: DriftItem[];
+  /** 복구 작업이 예약돼 있는지 (매시 cron이 처리) */
+  repairPending: boolean;
+}
+
 export interface LeaseDetail extends LeaseItem {
   auditLogs: LeaseAuditItem[];
+  dnsState: LeaseDnsState;
 }
 
 export interface LeasesResponse {

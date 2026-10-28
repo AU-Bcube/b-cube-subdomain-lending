@@ -4,7 +4,9 @@ import {
   createLeaseSchema,
   replaceRecordsSchema,
   type LeaseAuditItem,
+  type DriftItem,
   type LeaseDetail,
+  type LeaseDnsState,
   type LeaseItem,
   type LeasesResponse,
   type NameAvailability,
@@ -14,7 +16,9 @@ import type { Config } from "../env";
 import { apiError } from "../lib/http";
 import { requireUser } from "../middleware/auth";
 import { requestMeta } from "../services/audit";
-import { createDnsClient, DnsError } from "../services/cloudflare-dns";
+import { createDnsClient, DnsError, type DnsClient } from "../services/cloudflare-dns";
+import { queueRepair } from "../services/dns-ops";
+import { diffRecords } from "../services/drift";
 import {
   checkAvailability,
   createLease,
@@ -83,6 +87,26 @@ async function ownLease(c: Context<HonoEnv>): Promise<LeaseRow | null> {
   return lease && lease.owner_email === c.var.user.email ? lease : null;
 }
 
+/**
+ * 상세 화면용 Cloudflare 실제 상태 (SPEC §9). active lease만 조회한다(호출 1회).
+ * DB 값과 다르면 복구 작업을 예약한다. 매시 cron이 DB 값으로 맞춘다.
+ */
+async function dnsStateOf(db: D1Database, dns: DnsClient, lease: LeaseRow, records: readonly RecordRow[]): Promise<LeaseDnsState> {
+  const pending = async () => (await db.prepare(`SELECT 1 FROM dns_ops WHERE lease_id = ? LIMIT 1`).bind(lease.id).first()) !== null;
+  if (lease.status !== "active") return { checked: false, reason: "not_active", items: [], repairPending: await pending() };
+  if (dns.dryRun) return { checked: false, reason: "dry_run", items: [], repairPending: await pending() };
+  let items: DriftItem[];
+  try {
+    items = diffRecords(await dns.listByLease(lease.id), records);
+  } catch (err) {
+    if (!(err instanceof DnsError)) throw err;
+    return { checked: false, reason: "error", items: [], repairPending: await pending() };
+  }
+  // "Cloudflare에만 있음"은 이 앱이 만들었다는 근거가 DB에 없을 수 있어 복구 대상이 아니다(작업 기록이 있으면 그쪽에서 처리).
+  if (items.some((i) => i.kind !== "cf_only")) await queueRepair(db, lease.id);
+  return { checked: true, reason: null, items, repairPending: await pending() };
+}
+
 const notFound = (c: Context<HonoEnv>) => apiError(c, 404, "not_found", "서브도메인을 찾을 수 없습니다.");
 
 export const nameRoutes = new Hono<HonoEnv>().get("/:name/availability", requireUser, async (c) => {
@@ -130,6 +154,7 @@ export const leaseRoutes = new Hono<HonoEnv>()
       .all<{ id: number; at: number; actor_role: LeaseAuditItem["actorRole"]; action: LeaseAuditItem["action"]; detail: string | null }>();
     const body: LeaseDetail = {
       ...leaseItem(lease, records, c.var.config),
+      dnsState: await dnsStateOf(db, createDnsClient(c.var.config), lease, records),
       auditLogs: results.map((r) => ({
         id: r.id,
         at: r.at,

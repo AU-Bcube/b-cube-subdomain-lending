@@ -43,6 +43,8 @@ export interface DnsClient {
   remove(id: string): Promise<void>;
   /** comment가 `bcd:lease=`로 시작하는 레코드 전부 */
   listManaged(): Promise<CfDnsRecord[]>;
+  /** comment가 `bcd:lease=<leaseId>`인 레코드 */
+  listByLease(leaseId: string): Promise<CfDnsRecord[]>;
 }
 
 type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
@@ -142,6 +144,7 @@ export function createDnsClient(config: Config, fetcher: Fetcher = (input, init)
       await call("remove", `/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
     listManaged: () => listAll(new URLSearchParams({ "comment.startswith": LEASE_COMMENT_PREFIX })),
+    listByLease: (leaseId) => listAll(new URLSearchParams({ "comment.exact": leaseComment(leaseId) })),
   };
 }
 
@@ -166,6 +169,10 @@ function dryRunClient(): DnsClient {
     },
     async listManaged() {
       log("listManaged");
+      return [];
+    },
+    async listByLease(leaseId) {
+      log("listByLease", leaseId);
       return [];
     },
   };
