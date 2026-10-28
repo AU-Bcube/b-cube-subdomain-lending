@@ -323,7 +323,7 @@ export interface RecordSetInput {
 
 /**
  * lease 하나의 레코드 세트를 검사하고 정규화한다.
- * proxied는 ip 타입의 A/AAAA에서만 사용자 값을 따르고, 나머지는 false로 강제한다.
+ * proxied는 사용자 값과 무관하게 A/AAAA/CNAME은 true, TXT는 false로 강제한다(TXT는 프록시할 수 없다).
  */
 export function validateRecordSet(
   input: RecordSetInput,
@@ -373,7 +373,7 @@ export function validateRecordSet(
         }
         break;
     }
-    const proxied = targetKind === "ip" && (rtype === "A" || rtype === "AAAA") ? record.proxied === true : false;
+    const proxied = rtype !== "TXT";
     records.push({ type: rtype, host, content, proxied });
   });
   if (errors.length > 0) return { ok: false, errors };

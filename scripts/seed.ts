@@ -77,6 +77,7 @@ interface SeedRecord {
   type: "A" | "AAAA" | "CNAME" | "TXT";
   host: string;
   content: string;
+  /** 생략하면 서비스 규칙과 같게 TXT 외에는 true */
   proxied?: boolean;
   /** false이면 cf_record_id = NULL (Cloudflare에서 제거된 상태) */
   live?: boolean;
@@ -400,7 +401,7 @@ for (const l of leases) {
         r.type,
         r.host,
         r.content,
-        r.proxied ? 1 : 0,
+        (r.proxied ?? r.type !== "TXT") ? 1 : 0,
         l.createdAt,
         l.createdAt,
       ]
