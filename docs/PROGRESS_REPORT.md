@@ -191,6 +191,7 @@
 | 폰트 CDN 선택 (한국 기준 최속) | 1.x | 완료 (2026-10-28). 셀프 호스팅(`@fontsource` 번들)에서 jsDelivr `@fontsource/ibm-plex-sans-kr@5.3.0`로 전환, SRI(sha384) 적용, 패키지 제거. 한국(Cloudflare ICN) 측정: jsDelivr woff2 약 35ms, Google Fonts(`fonts.gstatic.com`) 약 170ms, cdnfonts CSS 약 210ms. 측정은 한 회선 기준 |
 | 코드 표시 폰트 D2Coding | 5.x | 완료 (2026-10-28). jsDelivr `d2coding@1.3.2` subset CSS(SRI 적용), `styles.scss`의 `$font-mono`로 `.mono`, `.json`, `.json-detail`에 적용. Carbon 내장 컴포넌트의 코드 글꼴(IBM Plex Mono 지정)은 바꾸지 않음 |
 | 운영 500 로그에 오류 메시지가 빠짐 | 2.x | 해결 (2026-10-28). `app.onError`가 `err.message`와 `cause`를 따로 남김 (`worker/app.ts`) |
+| 빌드 경고 "Some chunks are larger than 500 kB" (JS 단일 청크 650kB) | 5.x | 해결 (2026-10-28). 새 서브도메인·상세·관리 화면을 `React.lazy`로 분리, react·carbon 라이브러리 청크 분리(`vite.config.ts`). 최대 청크 258kB. CSS(1.4MB, gzip 217kB)는 Carbon 전체 스타일이라 그대로 |
 | 테스트가 `wrangler.jsonc`의 운영 `REQUIRE_HD=true`에 영향받음 | 2.x | 해결 (2026-10-28). `vitest.config.ts` 바인딩에 `REQUIRE_HD`, `EXTRA_RESERVED_NAMES` 고정 |
 | 실제 Google 계정 로그인과 `hd` 클레임 (체크리스트 7번) | 2.1, 2.2, 2.8 | 미확인. 사용자가 브라우저에서 직접 로그인해야 한다. 로컬 `/auth/login`이 Google로 올바른 파라미터(PKCE, `redirect_uri=http://localhost:5173/auth/callback`)와 함께 리다이렉트하는 것까지 확인 (2026-10-27) |
 
