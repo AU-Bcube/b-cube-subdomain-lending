@@ -1,13 +1,15 @@
 import { Content, Loading, Theme } from "@carbon/react";
-import { useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppHeader } from "./components/AppHeader";
 import { LoginPage } from "./pages/Login";
-import { AdminPage } from "./pages/admin/AdminPage";
-import { LeaseDetailPage } from "./pages/LeaseDetail";
 import { MyLeasesPage } from "./pages/MyLeases";
-import { NewLeasePage } from "./pages/NewLease";
 import { useSession } from "./session";
+
+// 첫 화면(로그인, 내 목록) 외에는 들어갈 때 불러온다. 관리 화면은 일반 회원에게 필요 없다.
+const NewLeasePage = lazy(() => import("./pages/NewLease").then((m) => ({ default: m.NewLeasePage })));
+const LeaseDetailPage = lazy(() => import("./pages/LeaseDetail").then((m) => ({ default: m.LeaseDetailPage })));
+const AdminPage = lazy(() => import("./pages/admin/AdminPage").then((m) => ({ default: m.AdminPage })));
 
 function usePrefersDark(): boolean {
   const query = "(prefers-color-scheme: dark)";
@@ -45,42 +47,44 @@ export function App() {
         {loading ? (
           <Loading description="불러오는 중" withOverlay={false} />
         ) : (
-          <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route
-              path="/"
-              element={
-                <RequireUser>
-                  <MyLeasesPage />
-                </RequireUser>
-              }
-            />
-            <Route
-              path="/new"
-              element={
-                <RequireUser>
-                  <NewLeasePage />
-                </RequireUser>
-              }
-            />
-            <Route
-              path="/leases/:id"
-              element={
-                <RequireUser>
-                  <LeaseDetailPage />
-                </RequireUser>
-              }
-            />
-            <Route
-              path="/admin"
-              element={
-                <RequireAdmin>
-                  <AdminPage />
-                </RequireAdmin>
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Suspense fallback={<Loading description="불러오는 중" withOverlay={false} />}>
+            <Routes>
+              <Route path="/login" element={<LoginPage />} />
+              <Route
+                path="/"
+                element={
+                  <RequireUser>
+                    <MyLeasesPage />
+                  </RequireUser>
+                }
+              />
+              <Route
+                path="/new"
+                element={
+                  <RequireUser>
+                    <NewLeasePage />
+                  </RequireUser>
+                }
+              />
+              <Route
+                path="/leases/:id"
+                element={
+                  <RequireUser>
+                    <LeaseDetailPage />
+                  </RequireUser>
+                }
+              />
+              <Route
+                path="/admin"
+                element={
+                  <RequireAdmin>
+                    <AdminPage />
+                  </RequireAdmin>
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         )}
       </Content>
     </Theme>
