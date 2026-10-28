@@ -1,4 +1,4 @@
-// IBM Plex Sans KR을 @fontsource로 셀프 호스팅하므로 Carbon 기본 font-face(IBM Plex Sans)는 끈다.
+// IBM Plex Sans KR은 index.html에서 jsDelivr CDN으로 불러오므로 Carbon 기본 font-face(IBM Plex Sans)는 끈다.
 @use '@carbon/react/scss/config' with (
   $css--font-face: false
 );
