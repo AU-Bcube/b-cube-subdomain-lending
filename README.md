@@ -44,7 +44,7 @@ dev 서버가 떠 있을 때 다음 주소로 각 작업을 실행할 수 있습
 ```bash
 curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=17+*+*+*+*"   # 헬스체크
 curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=0+18+*+*+*"   # 만료 처리 + 만료 세션 삭제
-curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=30+18+*+*+0"  # 드리프트 점검
+curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=30+18+*+*+SUN"  # 드리프트 점검
 ```
 
 `DNS_DRY_RUN=true`에서는 드리프트 점검이 Cloudflare를 조회하지 않으므로 모든 레코드가 "DB에만 있음"으로 나옵니다.
@@ -99,7 +99,7 @@ curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=30+18+*+*+0"  # 드�
 |---|---|---|
 | `17 * * * *` | 매시 17분 | 헬스체크: 24시간 넘게 검사하지 않은 active lease 최대 10개. 하루(KST) 1회 실패 누적, 7일 연속 실패면 일시 중지 |
 | `0 18 * * *` | 매일 03:00 | 만료 처리(만료된 active, 일시 중지 30일 경과), 만료 세션 삭제 |
-| `30 18 * * 0` | 월요일 03:30 | 드리프트 점검. 결과는 관리 → 드리프트 탭. **자동 삭제하지 않음** |
+| `30 18 * * SUN` | 월요일 03:30 | 드리프트 점검. 결과는 관리 → 드리프트 탭. **자동 삭제하지 않음** |
 
 ### 자주 하는 일
 
