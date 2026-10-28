@@ -76,6 +76,7 @@ export const AUDIT_ACTIONS = [
   "admin.unban",
   "system.drift_detected",
   "system.dns_repair",
+  "admin.dns_recover",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type ActorRole = "user" | "admin" | "system";
@@ -190,6 +191,16 @@ export interface DriftResponse {
     repaired: DriftRepairSummary | null;
   } | null;
   pendingOps: PendingDnsOp[];
+  /** 작업 기록 복구의 마지막 실행(cron 또는 수동). `availableAt` 전에는 수동 실행이 거부된다 */
+  recoverLock: { startedAt: number; trigger: "cron" | "manual"; availableAt: number } | null;
+}
+
+export interface RecoverOpsResponse {
+  /** 처리해서 지운 작업 기록 수 */
+  recovered: number;
+  failed: number;
+  /** Cloudflare를 실제로 바꾼 lease 수 */
+  changedLeases: number;
 }
 
 export interface ApiErrorBody {

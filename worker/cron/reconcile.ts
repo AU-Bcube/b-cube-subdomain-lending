@@ -7,6 +7,7 @@ import type { DriftRepairSummary } from "../../shared/schemas";
 import { auditStatement } from "../services/audit";
 import type { DnsClient } from "../services/cloudflare-dns";
 import { diffRecords } from "../services/drift";
+import { acquireLock, RECOVER_LOCK, RECOVER_LOCK_MS } from "../services/job-lock";
 import type { RecordRow } from "../services/leases";
 import { changedCount, recoverPendingOps, repairLease, type RepairResult } from "../services/repair";
 
@@ -59,7 +60,8 @@ export async function runReconcile(db: D1Database, dns: DnsClient, now = Date.no
   try {
     items = await snapshot(db, dns);
     // dry-run에서는 Cloudflare 목록이 항상 비어 있어 비교 결과가 의미 없으므로 복구하지 않는다.
-    if (!dns.dryRun) {
+    // 복구는 작업 기록 복구와 같은 잠금을 쓴다. 3분 안에 수동 복구가 있었으면 이번에는 비교 결과만 남긴다.
+    if (!dns.dryRun && (await acquireLock(db, RECOVER_LOCK, "cron", RECOVER_LOCK_MS, now)).ok) {
       repaired = await autoRepair(db, dns, items, now);
       if (repaired.leases.length > 0) items = await snapshot(db, dns);
     }

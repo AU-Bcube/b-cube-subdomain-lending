@@ -20,7 +20,7 @@
 | M8 | README, 배포 | 8 | 3 | 1 | 배포 진행 중 (cron 등록 실패 수정, 재배포 필요) |
 | | **합계** | **94** | **84** | **1** | **약 89%** |
 
-현재 위치: SPEC의 코드 작업은 모두 구현했다(테스트 7개 파일 279건 통과, 2026-10-28 드리프트 자동 복구 추가). 남은 것은 화면 확인(1.15, 5.12, 5.13, 6.13), 벤더 시그니처 실측(7.4), 운영 배포(8.3, 8.5~8.8, 사용자 확인 필요)다. 2026-10-28 첫 배포에서 cron 등록이 실패해 요일 표기를 고쳤다(8.7). 구현 제한점은 [LIMITATIONS.md](LIMITATIONS.md)에 정리했다.
+현재 위치: SPEC의 코드 작업은 모두 구현했다(테스트 7개 파일 284건 통과, 2026-10-28 드리프트 자동 복구 추가). 남은 것은 화면 확인(1.15, 5.12, 5.13, 6.13), 벤더 시그니처 실측(7.4), 운영 배포(8.3, 8.5~8.8, 사용자 확인 필요)다. 2026-10-28 첫 배포에서 cron 등록이 실패해 요일 표기를 고쳤다(8.7). 구현 제한점은 [LIMITATIONS.md](LIMITATIONS.md)에 정리했다.
 
 진행 순서 변경 (2026-10-27):
 1. 도메인 화면을 먼저 확인하기 위해 M2의 OAuth(2.1, 2.2), `/auth/debug`(2.8), M2 테스트(2.10~2.12)를 보류하고 M3 → M4 → M5 순서로 진행한다. 가짜 로그인과 `DNS_DRY_RUN=true`만으로 개발할 수 있어 OAuth가 없어도 막히지 않는다. 보류한 M2 작업은 M5 이후에 진행한다.
@@ -191,6 +191,7 @@
 | 폰트 CDN 선택 (한국 기준 최속) | 1.x | 완료 (2026-10-28). 셀프 호스팅(`@fontsource` 번들)에서 jsDelivr `@fontsource/ibm-plex-sans-kr@5.3.0`로 전환, SRI(sha384) 적용, 패키지 제거. 한국(Cloudflare ICN) 측정: jsDelivr woff2 약 35ms, Google Fonts(`fonts.gstatic.com`) 약 170ms, cdnfonts CSS 약 210ms. 측정은 한 회선 기준 |
 | 코드 표시 폰트 D2Coding | 5.x | 완료 (2026-10-28). jsDelivr `d2coding@1.3.2` subset CSS(SRI 적용), `styles.scss`의 `$font-mono`로 `.mono`, `.json`, `.json-detail`에 적용. Carbon 내장 컴포넌트의 코드 글꼴(IBM Plex Mono 지정)은 바꾸지 않음 |
 | 드리프트 감소와 자동 복구 | 7.8 | 완료 (2026-10-28). ① DNS 작업 기록 `dns_ops`(intent log, `migrations/0003_dns_ops.sql`) ② 매시·주간 자동 복구(`worker/services/repair.ts`), "Cloudflare에만 있음"은 보고만 ③ 상세 화면 Cloudflare 실제 상태(`dnsState`) ④ 대시보드 직접 수정 금지 운영 규칙(`DEV.md`). SPEC §0-4, §5, §8, §9, §10.2, §10.3 변경. 테스트 `test/repair.test.ts` 9건 추가, 주간 점검 테스트 갱신 |
+| DNS 작업 기록 수동 복구 | 7.8 | 완료 (2026-10-28). 드리프트 탭 "지금 복구" 버튼, `POST /api/admin/dns-ops/recover`(시도 상한 무시, 감사 로그 `admin.dns_recover`). 잠금 `job_locks`(`migrations/0004_job_locks.sql`)로 cron·수동 실행 뒤 3분간 다른 실행 거부. 복구 예약(`repair`)은 10분 대기 없이 처리. 테스트 5건 추가(284건 통과) |
 | 운영 500 로그에 오류 메시지가 빠짐 | 2.x | 해결 (2026-10-28). `app.onError`가 `err.message`와 `cause`를 따로 남김 (`worker/app.ts`) |
 | 빌드 경고 "Some chunks are larger than 500 kB" (JS 단일 청크 650kB) | 5.x | 해결 (2026-10-28). 새 서브도메인·상세·관리 화면을 `React.lazy`로 분리, react·carbon 라이브러리 청크 분리(`vite.config.ts`). 최대 청크 258kB. CSS(1.4MB, gzip 217kB)는 Carbon 전체 스타일이라 그대로 |
 | 테스트가 `wrangler.jsonc`의 운영 `REQUIRE_HD=true`에 영향받음 | 2.x | 해결 (2026-10-28). `vitest.config.ts` 바인딩에 `REQUIRE_HD`, `EXTRA_RESERVED_NAMES` 고정 |
@@ -221,6 +222,7 @@
 | 2026-10-27: 연장·재확인·반납 가능 상태, 재확인 1분 제한과 실패 미집계, suspended 재확인 방식, 소유자용 감사 로그 범위 | §9 |
 | 2026-10-27: suspended 만료는 매일 만료 cron에서 처리, 실패 집계는 KST 하루 1회 | §10.2 |
 | 2026-10-27: dry-run 드리프트 결과 안내 | §10.3 |
+| 2026-10-28: 작업 기록 수동 복구 API·버튼, 복구 잠금 3분(`job_locks`), `repair` 예약 즉시 처리 | §5, §8, §9, §10.2, §11 |
 | 2026-10-28: DNS 작업 기록(`dns_ops`)과 lease 단위 자동 복구, 드리프트 점검의 안전한 자동 복구("Cloudflare에만 있음" 제외), 상세 화면 `dnsState`, 조작 근거에 `dns_ops.cf_ids` 추가 | §0-4, §5, §8, §9, §10.2, §10.3, §11 |
 | 2026-10-28: 코드 표시 폰트 D2Coding (jsDelivr) | 디자인 |
 | 2026-10-28: 폰트를 jsDelivr CDN에서 불러오고 CSP에 `cdn.jsdelivr.net` 추가 | §6.4, 디자인 |

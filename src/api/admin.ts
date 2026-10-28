@@ -1,4 +1,4 @@
-import type { AdminLeaseItem, AdminUserItem, AuditLogItem, DriftResponse, Paged } from "../../shared/schemas";
+import type { AdminLeaseItem, AdminUserItem, AuditLogItem, DriftResponse, Paged, RecoverOpsResponse } from "../../shared/schemas";
 import { api } from "./client";
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -25,4 +25,5 @@ export const adminApi = {
   auditLogs: (p: { actor?: string; action?: string; lease?: string; from?: number; to?: number; page: number }) =>
     api<Paged<AuditLogItem>>(`/api/admin/audit-logs${qs(p)}`),
   drift: () => api<DriftResponse>("/api/admin/drift"),
+  recoverOps: () => api<RecoverOpsResponse>("/api/admin/dns-ops/recover", { method: "POST" }),
 };

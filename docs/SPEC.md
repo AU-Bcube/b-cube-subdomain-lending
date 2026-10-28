@@ -275,8 +275,9 @@ CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
 - `migrations/0003_dns_ops.sql`:
   - `dns_ops(id, lease_id, kind, cf_ids, started_at, attempts, last_error)`: DNS 작업 기록(§8). `cf_ids`는 이 작업이 만들었거나 지워야 할 Cloudflare 레코드 id(JSON 배열)다.
   - `reconcile_runs.repaired TEXT`: 드리프트 점검의 자동 복구 결과(JSON, §10.3).
+- `migrations/0004_job_locks.sql`: `job_locks(name, started_at, trigger)`. 작업 실행 잠금(§10.2). 해제하지 않고 시간으로 만료된다.
 
-**감사 로그 action 목록**: `auth.login`, `auth.login_denied`, `auth.logout`, `lease.create`, `lease.update_records`, `lease.renew`, `lease.release`, `lease.recheck`, `lease.reactivate`, `system.health_fail`, `system.suspend`, `system.expire`, `admin.revoke`, `admin.ban`, `admin.unban`, `system.drift_detected`
+**감사 로그 action 목록**: `auth.login`, `auth.login_denied`, `auth.logout`, `lease.create`, `lease.update_records`, `lease.renew`, `lease.release`, `lease.recheck`, `lease.reactivate`, `system.health_fail`, `system.suspend`, `system.expire`, `admin.revoke`, `admin.ban`, `admin.unban`, `system.drift_detected`, `system.dns_repair`, `admin.dns_recover`
 
 ## 6. 인증 및 세션
 
@@ -402,7 +403,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 - **DNS 작업 기록 (`dns_ops`, intent log)** (`services/dns-ops.ts`, `services/repair.ts`)
   - Cloudflare를 바꾸는 작업(생성, 교체, 재활성화, 반납, 회수, 만료, suspend)은 시작 전에 `dns_ops` 행을 쓴다. 만든 레코드 id는 만든 직후 `cf_ids`에 더한다.
   - 행은 DB 반영과 **같은 batch**에서 지운다. 롤백을 모두 마쳤을 때도 지운다. 교체는 DB 반영 시 `cf_ids`를 "지울 기존 레코드"로 바꾸고, 삭제까지 끝나면 지운다.
-  - 남은 행은 중간에 실패했거나 Worker가 끊긴 작업이다. 매시 cron(§10.2)이 10분 넘게 남은 행의 lease를 **DB 기준으로 복구**한다(`repairLease`):
+  - 남은 행은 중간에 실패했거나 Worker가 끊긴 작업이다. 매시 cron(§10.2)이나 관리자 수동 실행이 10분 넘게 남은 행(복구 예약 `repair`는 바로)의 lease를 **DB 기준으로 복구**한다(`repairLease`):
     - `cf_ids` 중 DB records가 참조하지 않는 레코드 → 삭제
     - lease가 active가 아님(suspended, 종료, 없음) → DB가 참조하는 레코드 삭제, `cf_record_id=NULL`
     - lease가 active → `listByLease`로 실제 상태를 보고, 없는 레코드는 다시 만들고 내용이 다르면 DB 값으로 되돌린다(dry-run에서는 건너뜀)
@@ -450,7 +451,8 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 | POST | `/api/admin/users/:email/ban` | `{ reason }` 필수. 차단 → 해당 사용자의 세션 전부 삭제, 모든 active·suspended lease를 revoke(사유: `user_banned`). suspended를 남기면 차단된 사용자가 이름을 계속 점유하기 때문이다. 자기 자신은 차단할 수 없다(400 `cannot_ban_self`) |
 | POST | `/api/admin/users/:email/unban` | 차단 해제 (revoke된 lease는 복구하지 않음) |
 | GET | `/api/admin/audit-logs?actor=&action=&lease=&from=&to=&page=` | 감사 로그 조회 |
-| GET | `/api/admin/drift` | 최근 reconcile 결과 |
+| GET | `/api/admin/drift` | 최근 reconcile 결과, 끝나지 않은 DNS 작업 기록(`pendingOps`), 복구 잠금 상태(`recoverLock`) |
+| POST | `/api/admin/dns-ops/recover` | 끝나지 않은 DNS 작업 기록 수동 복구. 시도 상한을 넘은 행도 다시 시도한다. 마지막 복구(cron 포함) 뒤 3분 안이면 429 `recover_too_soon`(`Retry-After`). 감사 로그 `admin.dns_recover` |
 
 **모든 상태 변경 API는 감사 로그를 남긴다.** detail에는 변경 전/후 레코드를 기록한다.
 
@@ -487,6 +489,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
     - 이 전환과 "suspended인데 `expires_at`이 지난 lease"의 만료는 매일 만료 cron(§10.1)에서 처리한다. `status_reason`은 `lease_expired` 또는 `suspended_too_long`이다.
   - 실패 횟수와 `system.health_fail` 기록은 KST 기준 하루 1회다.
 - 헬스체크 뒤에 남은 DNS 작업 기록을 복구한다(§8, 한 번에 최대 20개).
+- 작업 기록 복구는 잠금 `dns_ops_recover`(`job_locks`)로 cron과 수동 실행이 겹치지 않게 한다. 실행을 시작하면 시각을 기록하고, 그 뒤 3분 동안 다른 실행은 거부한다. 수동은 429, cron은 이번 실행의 작업 기록 복구를 건너뛴다(다음 매시에 처리). 주간 점검의 자동 복구도 같은 잠금을 쓰며, 잡지 못하면 비교 결과만 남긴다.
 
 ### 10.3 드리프트 점검: 매주 `30 18 * * SUN`
 - Cloudflare에서 comment가 `bcd:lease=`인 레코드 목록과 DB records를 비교한다.
@@ -529,7 +532,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
    - **전체 임대**: 검색/필터 `DataTable`, 행별 "강제 회수"(사유 `TextArea` 필수인 Modal)
    - **사용자**: 검색, 보유 수, 차단/해제(사유 필수)
    - **감사 로그**: 필터(작업자/액션/기간), 페이지네이션, detail JSON 펼쳐보기
-   - **드리프트**: 최근 reconcile 결과, 자동 복구 결과, 끝나지 않은 DNS 작업 기록
+   - **드리프트**: 최근 reconcile 결과, 자동 복구 결과, 끝나지 않은 DNS 작업 기록과 "지금 복구" 버튼(잠금 중에는 남은 초를 표시하고 비활성)
 - 모든 폼은 `shared/schemas.ts`의 zod 스키마로 클라이언트에서 먼저 검증하고, 서버에서 다시 검증한다.
 - 에러는 `ToastNotification`, 로딩은 `DataTableSkeleton`/`InlineLoading`으로 처리한다.
 
