@@ -1,5 +1,5 @@
 /**
- * 드리프트 점검 (SPEC §10.3). 매주 `30 18 * * 0`.
+ * 드리프트 점검 (SPEC §10.3). 매주 `30 18 * * SUN`.
  * Cloudflare의 `bcd:lease=` 레코드와 DB records(cf_record_id가 있는 행)를 비교한다. 자동 삭제는 하지 않는다.
  */
 import { normalizeHostname, parseIPv6 } from "../../shared/rules";

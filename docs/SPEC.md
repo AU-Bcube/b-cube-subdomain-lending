@@ -88,7 +88,7 @@
   "assets": { "not_found_handling": "single-page-application", "run_worker_first": ["/api/*", "/auth/*"] },
   "routes": [{ "pattern": "domain.b-cube.kr", "custom_domain": true }],
   "d1_databases": [{ "binding": "DB", "database_name": "bcube-domain", "database_id": "<생성 후 기입>" }],
-  "triggers": { "crons": ["17 * * * *", "0 18 * * *", "30 18 * * 0"] },
+  "triggers": { "crons": ["17 * * * *", "0 18 * * *", "30 18 * * SUN"] },
   "vars": {
     "APP_ORIGIN": "https://domain.b-cube.kr",
     "ZONE_NAME": "b-cube.kr",
@@ -474,10 +474,11 @@ lease 하나(`alice`)의 레코드 구성 규칙:
     - 이 전환과 "suspended인데 `expires_at`이 지난 lease"의 만료는 매일 만료 cron(§10.1)에서 처리한다. `status_reason`은 `lease_expired` 또는 `suspended_too_long`이다.
   - 실패 횟수와 `system.health_fail` 기록은 KST 기준 하루 1회다.
 
-### 10.3 드리프트 점검: 매주 `30 18 * * 0`
+### 10.3 드리프트 점검: 매주 `30 18 * * SUN`
 - Cloudflare에서 comment가 `bcd:lease=`인 레코드 목록과 DB records를 비교한다.
 - Cloudflare에만 있거나, DB에만 있거나, 내용이 다른 레코드를 감지하면 감사 로그 `system.drift_detected`에 남기고 관리자 드리프트 탭에 표시한다.
 - **자동 삭제는 하지 않는다.**
+- Cloudflare cron은 요일 `0`을 받지 않는다(1–7 또는 `SUN`–`SAT`, 1=일요일). 그래서 `SUN`으로 쓴다.
 - `DNS_DRY_RUN=true`에서는 Cloudflare를 조회하지 않으므로 결과에 그 사실을 `error` 문구로 남긴다(모든 레코드가 DB에만 있음으로 나온다).
 
 `scheduled` 핸들러는 `controller.cron` 값으로 위 세 작업을 분기한다.

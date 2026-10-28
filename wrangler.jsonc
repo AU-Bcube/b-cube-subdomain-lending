@@ -18,7 +18,7 @@
       "migrations_dir": "migrations"
     }
   ],
-  "triggers": { "crons": ["17 * * * *", "0 18 * * *", "30 18 * * 0"] },
+  "triggers": { "crons": ["17 * * * *", "0 18 * * *", "30 18 * * SUN"] },
   "observability": { "enabled": true },
   "vars": {
     "APP_ORIGIN": "https://domain.b-cube.kr",
