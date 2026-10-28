@@ -45,7 +45,10 @@ export function createApp(config: Config): Hono<HonoEnv> {
 
   app.notFound((c) => apiError(c, 404, "not_found", "요청한 경로를 찾을 수 없습니다."));
   app.onError((err, c) => {
-    console.error("[unhandled]", c.req.method, c.req.path, err);
+    // Workers 로그는 Error 객체의 stack만 남기고 message를 빠뜨릴 때가 있어(D1 오류 등) 따로 남긴다.
+    const message = err instanceof Error ? err.message : String(err);
+    const cause = err instanceof Error && err.cause !== undefined ? String(err.cause) : undefined;
+    console.error("[unhandled]", c.req.method, c.req.path, message, ...(cause ? [`cause: ${cause}`] : []), err);
     return apiError(c, 500, "internal_error", "서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.");
   });
   return app;
