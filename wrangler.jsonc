@@ -14,7 +14,7 @@
       "binding": "DB",
       "database_name": "bcube-domain",
       // `wrangler d1 create bcube-domain` 후 실제 id로 교체한다.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "016663b2-a71d-4f99-9459-f1846b932613",
       "migrations_dir": "migrations"
     }
   ],
@@ -23,19 +23,17 @@
   "vars": {
     "APP_ORIGIN": "https://domain.b-cube.kr",
     "ZONE_NAME": "b-cube.kr",
-    // 사용자 제공 값으로 채운다.
-    "CF_ZONE_ID": "",
-    "GOOGLE_CLIENT_ID": "",
+    // npx wrangler secret put <SECRET_NAME>
+    // required secrets CF_ZONE_ID, CF_API_TOKEN, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ADMIN_EMAILS
+    // optional secrets EXTRA_RESERVED_NAMES
     "ALLOWED_EMAIL_DOMAIN": "ajou.ac.kr",
-    "REQUIRE_HD": "false",
-    "ADMIN_EMAILS": "",
+    "REQUIRE_HD": "true",
     "MAX_LEASES_PER_USER": "3",
     "LEASE_DAYS": "180",
     "RENEW_WINDOW_DAYS": "30",
     "NAME_HOLD_DAYS": "30",
     "HEALTH_GRACE_DAYS": "3",
     "HEALTH_FAIL_THRESHOLD": "7",
-    "EXTRA_RESERVED_NAMES": "",
     "DNS_DRY_RUN": "false",
     "DEV_AUTH_DEBUG": "false",
     "DEV_FAKE_LOGIN": "false"
