@@ -235,7 +235,11 @@ describe("Cloudflare 호출 순서와 롤백 (live 모드)", () => {
       `POST TXT _vercel.${ZONE} vc-domain-verify=${fq(name)},abc123`,
     ]);
     const remote = [...cf.records.values()];
-    expect(remote.every((r) => r.comment === `bcd:lease=${lease.id}` && r.proxied === false)).toBe(true);
+    expect(remote.every((r) => r.comment === `bcd:lease=${lease.id}`)).toBe(true);
+    expect(remote.map((r) => [r.type, r.proxied])).toEqual([
+      ["CNAME", true],
+      ["TXT", false],
+    ]);
     expect((await recordRows(lease.id)).map((r) => r.cf_record_id)).toEqual(remote.map((r) => r.id));
   });
 

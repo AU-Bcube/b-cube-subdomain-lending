@@ -259,19 +259,19 @@ describe("validateRecordSet", () => {
       const result = run("vercel", [{ type: "CNAME", host: fqdn, content: "cname.vercel-dns.com" }]);
       expect(result).toEqual({
         ok: true,
-        records: [{ type: "CNAME", host: fqdn, content: "cname.vercel-dns.com", proxied: false }],
+        records: [{ type: "CNAME", host: fqdn, content: "cname.vercel-dns.com", proxied: true }],
       });
     });
 
     it("프로젝트별 CNAME 값과 검증 TXT", () => {
       const result = run("vercel", [
-        { type: "cname", host: `${fqdn}.`, content: "D1D4FC829FE7BC7C.vercel-dns-017.com.", proxied: true },
+        { type: "cname", host: `${fqdn}.`, content: "D1D4FC829FE7BC7C.vercel-dns-017.com.", proxied: false },
         { type: "TXT", host: `_vercel.${ZONE}`, content: `vc-domain-verify=${fqdn},abc123` },
       ]);
       expect(result).toEqual({
         ok: true,
         records: [
-          { type: "CNAME", host: fqdn, content: "d1d4fc829fe7bc7c.vercel-dns-017.com", proxied: false },
+          { type: "CNAME", host: fqdn, content: "d1d4fc829fe7bc7c.vercel-dns-017.com", proxied: true },
           { type: "TXT", host: `_vercel.${ZONE}`, content: `vc-domain-verify=${fqdn},abc123`, proxied: false },
         ],
       });
@@ -330,16 +330,16 @@ describe("validateRecordSet", () => {
   });
 
   describe("ip", () => {
-    it("A 2개 + AAAA 1개, proxied 유지", () => {
+    it("A 2개 + AAAA 1개, 사용자 값과 무관하게 A/AAAA는 proxied, TXT는 아님", () => {
       const result = run("ip", [
         { type: "A", host: fqdn, content: "1.1.1.1", proxied: true },
-        { type: "A", host: fqdn, content: "8.8.8.8" },
+        { type: "A", host: fqdn, content: "8.8.8.8", proxied: false },
         { type: "AAAA", host: fqdn, content: "2606:4700:4700::1111", proxied: true },
-        { type: "TXT", host: fqdn, content: "google-site-verification=abc" },
+        { type: "TXT", host: fqdn, content: "google-site-verification=abc", proxied: true },
         { type: "TXT", host: `_acme-challenge.${fqdn}`, content: "token" },
       ]);
       expect(result.ok).toBe(true);
-      if (result.ok) expect(result.records.map((r) => r.proxied)).toEqual([true, false, true, false, false]);
+      if (result.ok) expect(result.records.map((r) => r.proxied)).toEqual([true, true, true, false, false]);
     });
 
     it("AAAA만 1개", () => {
@@ -401,13 +401,13 @@ describe("validateRecordSet", () => {
   describe("cname", () => {
     it("CNAME + _acme-challenge TXT", () => {
       const result = run("cname", [
-        { type: "CNAME", host: fqdn, content: "my-app.netlify.app.", proxied: true },
+        { type: "CNAME", host: fqdn, content: "my-app.netlify.app.", proxied: false },
         { type: "TXT", host: `_acme-challenge.${fqdn}`, content: "token" },
       ]);
       expect(result).toEqual({
         ok: true,
         records: [
-          { type: "CNAME", host: fqdn, content: "my-app.netlify.app", proxied: false },
+          { type: "CNAME", host: fqdn, content: "my-app.netlify.app", proxied: true },
           { type: "TXT", host: `_acme-challenge.${fqdn}`, content: "token", proxied: false },
         ],
       });

@@ -1,118 +1,403 @@
+<div align="center">
+
 # B-CUBE Domain Console
 
-아주대 동아리 B-CUBE 회원(@ajou.ac.kr Google 계정)이 `<name>.b-cube.kr` 서브도메인을 빌려 Vercel, 서버 IP(AWS 등), 기타 CNAME 대상에 연결하는 웹 콘솔입니다.
+### 소학회 공용 도메인(b-cube.kr)의 셀프서비스 대여와 서브도메인 탈취 자동 방지 기반 운영 개선 제안
 
-- 주소: `https://domain.b-cube.kr`
-- 구성: Cloudflare Workers 하나 (Hono API + React/Carbon SPA + Cron), D1, Cloudflare DNS API
-- 명세: [docs/SPEC.md](docs/SPEC.md) · 진척: [docs/PROGRESS_REPORT.md](docs/PROGRESS_REPORT.md) · 제한점: [docs/LIMITATIONS.md](docs/LIMITATIONS.md) · 수동 작업: [docs/01-manual-checklist.md](docs/01-manual-checklist.md)
+![alt text](assets/cover.png)
 
-## 로컬 실행
+<!-- **{{주최 기관/협의체}}**
+**{{대회명}} 출품작**
 
-OAuth 클라이언트와 Cloudflare 토큰 없이 바로 동작합니다.
+| 접수번호 | 선정기관 |
+|:---:|:---:|
+| {{접수번호}} | {{선정기관}} | -->
 
-```bash
-cp .dev.vars.example .dev.vars   # 기본값: DEV_FAKE_LOGIN=true, DNS_DRY_RUN=true, 시크릿 비움
-npm install
-npm run db:reset
-npm run dev                      # → http://localhost:5173
-```
+</div>
 
-로그인 화면 하단의 개발용 버튼으로 시드 사용자에 로그인합니다.
+---
 
-| 페르소나 | 이메일 | 확인할 화면 |
-|---|---|---|
-| 일반 회원 | `member1@ajou.ac.kr` | 상태별 Tag, 만료 임박 배너, 일시 중지 재확인 안내, 상세·편집·연장·반납 |
-| 한도 도달 | `member2@ajou.ac.kr` | "새 서브도메인" 비활성과 툴팁 |
-| 신규 회원 | `newbie@ajou.ac.kr` | 빈 상태 화면, 생성 4단계 흐름 |
-| 관리자 | `admin@ajou.ac.kr` | 관리 탭 4개 |
-| 차단 사용자 | `banned@ajou.ac.kr` | 로그인 거부 화면 |
+## 목차
 
-> 시드의 `member1`은 사용 중 2개 + 일시 중지 1개로 이미 한도(3개)에 도달해 있습니다. 생성 흐름은 `newbie`로 확인하세요.
+1. [주제 설명](#1-주제-설명)
+   - [1.1 제안 배경](#11-제안-배경)
+   - [1.2 진단](#12-진단)
+2. [서비스 기획](#2-서비스-기획)
+   - [2.1 고객 타겟팅](#21-고객-타겟팅)
+   - [2.2 서비스](#22-서비스)
+   - [2.3 유사서비스 비교](#23-유사서비스-비교)
+3. [개발 개요](#3-개발-개요)
+   - [3.1 데이터 활용](#31-데이터-활용)
+   - [3.2 시스템 구축](#32-시스템-구축)
+4. [활용 방안](#4-활용-방안)
+   - [4.1 활성화 방안](#41-활성화-방안)
+   - [4.2 기대 효과](#42-기대-효과)
+- [참고 자료](#참고-자료)
 
-### 실제 Google 로그인 시험
+---
 
-`.dev.vars`에 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`을 채웁니다. Google 클라이언트의 리디렉션 URI에 `http://localhost:5173/auth/callback`이 있어야 합니다. `DEV_AUTH_DEBUG=true`이면 `/auth/debug`에서 마지막 로그인의 `email`, `email_verified`, `hd`를 볼 수 있습니다.
+# 1. 주제 설명
 
-### 실제 Cloudflare DNS 시험
+## 1.1 제안 배경
 
-`DNS_DRY_RUN=false`와 `CF_ZONE_ID`, `CF_API_TOKEN`을 채우면 로컬에서도 **실제 b-cube.kr DNS가 바뀝니다.** 시드 레코드의 `dry_…` id는 Cloudflare에 없으므로, 실제 모드로 바꾼 뒤에는 새로 만든 lease로 시험하세요.
+### 수요 — 학생 개발자의 결과물에는 "자기 주소"가 필요하다
 
-### Cron 수동 실행
+- 소학회 회원은 포트폴리오, 팀 프로젝트, 해커톤 결과물을 Vercel·AWS·Netlify 같은 호스팅에 올린다. 이때 기본으로 받는 주소는 `my-app-x1y2.vercel.app`처럼 호스팅 업체 이름이 붙은 임의 주소다.
+- Vercel, Netlify, GitHub Pages는 모두 사용자가 가진 도메인을 연결하는 기능을 제공한다. 하지만 학생이 프로젝트마다 도메인을 사서 갱신하고 DNS를 관리하기는 부담스럽다. 소학회가 이미 가진 `b-cube.kr` 아래 이름(`alice.b-cube.kr`)을 빌려 쓰면 이 부담이 사라지고, 결과물에 소학회 소속도 드러난다.
+- 자신의 결과물에 소학회 도메인을 쓰는 일은 곧 "나는 B-CUBE 회원"이라고 밝히는 일이다. 회원은 프로젝트를 공개하고 소개할 때마다 소학회의 일원임을 스스로 확인하고, 같은 주소 아래 모인 다른 회원의 결과물을 보며 함께 활동한다는 감각을 얻는다. 도메인은 기술 자원이면서 **소학회원으로서의 구성원 의식을 높이는 상징**이 된다.
 
-dev 서버가 떠 있을 때 다음 주소로 각 작업을 실행할 수 있습니다.
+### 위험 — 빌려준 주소는 방치되는 순간 "탈취 가능한 주소"가 된다
 
-```bash
-curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=17+*+*+*+*"   # 헬스체크
-curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=0+18+*+*+*"   # 만료 처리 + 만료 세션 삭제
-curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=30+18+*+*+SUN"  # 드리프트 점검
-```
+- 서브도메인이 가리키던 외부 서비스(호스팅 앱, 클라우드 IP)를 지웠는데 DNS 레코드만 남으면, 제3자가 같은 대상을 다시 만들어 그 서브도메인을 차지할 수 있다. 이를 **서브도메인 탈취(subdomain takeover)** 라고 한다(MDN, OWASP WSTG).
+- 탈취된 서브도메인은 상위 도메인의 이름으로 피싱 페이지를 띄우거나, 같은 사이트(same-site)로 취급되는 점을 이용해 다른 서브도메인의 쿠키를 건드리는 데 쓰일 수 있다. 회원이 졸업하거나 프로젝트를 접으면서 레코드를 방치하는 일은 소학회 환경에서 흔하다.
 
-`DNS_DRY_RUN=true`에서는 드리프트 점검이 Cloudflare를 조회하지 않으므로 모든 레코드가 "DB에만 있음"으로 나옵니다.
+<sub>출처: MDN Web Docs, "Subdomain takeovers"; OWASP, Web Security Testing Guide, WSTG-CONF-10 "Test for Subdomain Takeover"; Vercel·Netlify·GitHub Pages 공식 문서의 커스텀 도메인 안내</sub>
 
-## npm 스크립트
+<div align="center">
 
-| 스크립트 | 동작 |
+### **소학회 회원**의 **도메인 사용**을 부담스럽게 만들고, **운영진**의 **도메인 관리**를 위험하게 만드는 환경
+
+</div>
+
+> **핵심 메시지**
+> "회원은 쉽게 빌려 소속을 드러내고, 운영진은 안전하게 돌려받는 소학회 도메인"
+> → **셀프서비스 대여 콘솔과 자동 회수 체계** 가 필요
+
+---
+
+## 1.2 진단
+
+콘솔이 없으면 운영진이 Cloudflare 대시보드에서 레코드를 직접 만들고 지워야 한다. 이 수동 방식의 문제를 형식과 행동으로 나눠 본다.
+
+### 형식 진단
+
+<!-- 캡처 필요: Cloudflare 대시보드의 DNS 레코드 목록 화면 → images/diagnosis_form.png -->
+
+- **권한 구조**: 레코드를 만들 수 있는 사람은 존 관리 권한을 가진 운영진뿐이다. 회원에게 권한을 나눠 주면 존 전체(메인 사이트, 메일 레코드 포함)를 건드릴 수 있게 된다.
+- **소유 정보 부재**: DNS 레코드에는 "누가, 언제까지, 무엇에 쓰려고" 빌렸는지가 남지 않는다. 시간이 지나면 어떤 레코드를 지워도 되는지 알 수 없다.
+- **검증 규칙 부재**: 사설 IP, 다른 회원의 서브도메인을 가리키는 CNAME, `admin`·`mail` 같은 오해를 부르는 이름을 막을 장치가 사람의 주의력뿐이다.
+- **기한 부재**: 대여 기간과 만료 개념이 없어 한 번 만든 레코드는 누군가 지우기 전까지 영원히 남는다.
+
+### 행동 진단
+
+<!-- 캡처 필요: 메신저로 레코드 생성을 요청·처리하는 흐름 예시 → images/diagnosis_behavior.png -->
+
+- **수동 대기**: 회원은 메신저로 요청하고 운영진이 처리할 때까지 기다린다. Vercel 검증 TXT처럼 값이 바뀌는 작업은 요청이 여러 번 오간다.
+- **기록 없는 변경**: 누가 어떤 값을 바꿨는지 감사 기록이 없어 문제가 생겨도 경위를 추적할 수 없다.
+- **방치된 레코드**: 회원이 서비스를 내려도 레코드 삭제를 요청하지 않는다. 운영진은 대상이 살아 있는지 주기적으로 확인할 수단이 없다.
+- **사후 대응**: 남용(피싱, 사칭)이 발견돼도 해당 회원의 레코드를 한 번에 찾아 회수하기 어렵다.
+
+> **핵심 메시지**
+> 회원이 직접 빌리되, 규칙 검증과 회수는 시스템이 해야 한다.
+> → **규칙 기반 셀프서비스 + 헬스체크 기반 자동 일시 중지** 가 필요
+
+---
+
+# 2. 서비스 기획
+
+## 2.1 고객 타겟팅
+
+### 페르소나 A — "내 프로젝트에 소학회 주소를 붙이고 싶은데, 매번 운영진에게 부탁해야 하나요?"
+
+| | |
 |---|---|
-| `npm run dev` | SPA(HMR) + Worker + 로컬 D1 (`http://localhost:5173`) |
-| `npm run build` | SPA와 Worker 번들 생성 |
-| `npm run preview` | 빌드 결과를 workerd에서 실행. 코드를 바꾸면 다시 실행해야 반영됩니다 |
-| `npm run db:migrate:local` | 로컬 D1 마이그레이션 |
-| `npm run db:seed` | 로컬 D1 시드 (멱등) |
-| `npm run db:reset` | 로컬 D1 삭제 → 마이그레이션 → 시드 |
-| `npm run typecheck` | app / worker / node tsconfig 각각 `tsc --noEmit` |
-| `npm test` | Vitest (Workers 런타임, 로컬 D1, 외부 API는 fetch mock) |
-| `npm run cf-typegen` | `wrangler.jsonc` 변경 후 Worker 타입 재생성 |
-| `npm run deploy` | `vite build && wrangler deploy` — **운영 배포** |
+| <!-- 캡처 필요: 페르소나 A 일러스트 → images/persona_a.png --> | **김하늘(23)**<br>직업: 아주대학교 소프트웨어학과 3학년, B-CUBE 회원<br>소재: 경기 수원 |
 
-`db:*` 스크립트는 로컬 D1에만 작동합니다.
+**SCENARIO**
+취업용 포트폴리오를 Vercel에 배포했고, 팀 프로젝트 API 서버는 AWS EC2에서 돌린다. 둘 다 `b-cube.kr` 주소로 공개하고 싶다. Vercel이 도메인 검증용 TXT 값을 요구해서 운영진에게 두 번째 부탁을 해야 하는 상황이다.
 
-## 배포 절차 (운영)
+**PAINPOINT**
+- 운영진이 답할 때까지 배포를 마무리하지 못한다.
+- Vercel이 요구하는 CNAME·TXT 값이 무엇인지, 어디에 넣어야 하는지 헷갈린다.
+- 빌린 주소가 언제까지 유효한지, 지금 제대로 연결돼 있는지 알 길이 없다.
 
-아래 명령은 운영 환경을 바꿉니다. 순서대로, 각 단계 결과를 확인하며 직접 실행하세요.
+**NEEDS**
+- 원하는 이름을 바로 확인하고 직접 빌리기 <!-- → 2.2.2 -->
+- 연결 대상(Vercel/서버 IP/기타)에 맞는 입력 폼과 연결 가이드 <!-- → 2.2.2 -->
+- 내 서브도메인의 상태, 만료일, 변경 이력을 한곳에서 보기 <!-- → 2.2.1, 2.2.3 -->
 
-1. Cloudflare 로그인: `npx wrangler login`
-2. D1 생성: `npx wrangler d1 create bcube-domain` → 출력된 `database_id`를 `wrangler.jsonc`에 기입
-3. `wrangler.jsonc`의 `vars` 기입: `CF_ZONE_ID`, `GOOGLE_CLIENT_ID`, `ADMIN_EMAILS`, `REQUIRE_HD`(체크리스트 7번 결과)
-   - `APP_ORIGIN`은 `https://domain.b-cube.kr`, `DNS_DRY_RUN`·`DEV_FAKE_LOGIN`·`DEV_AUTH_DEBUG`는 모두 `"false"`여야 합니다. 하나라도 true면 모든 요청이 500이 됩니다(안전장치).
-4. 시크릿 입력 (값은 터미널에 직접 입력):
-   ```bash
-   npx wrangler secret put GOOGLE_CLIENT_SECRET
-   npx wrangler secret put CF_API_TOKEN
-   ```
-5. 원격 마이그레이션: `npx wrangler d1 migrations apply bcube-domain --remote`
-6. 배포: `npm run deploy`
-   - `routes`의 `custom_domain: true`로 `domain.b-cube.kr`이 Worker에 연결됩니다. 기존 `domain.b-cube.kr` DNS 레코드가 있으면 먼저 지워야 합니다.
-7. 배포 후 확인: [docs/01-manual-checklist.md](docs/01-manual-checklist.md) 8번 체크리스트
-   - `https://domain.b-cube.kr/api/health` → `{"status":"ok"}`
-   - `/auth/dev-login?as=admin`, `/api/dev/config`, `/auth/debug`가 404
-   - Workers 대시보드 → Triggers에 cron 3개
+### 페르소나 B — "누가 어떤 레코드를 만들었는지, 지워도 되는지 어떻게 알죠?"
 
-### 마이그레이션 추가
+| | |
+|---|---|
+| <!-- 캡처 필요: 페르소나 B 일러스트 → images/persona_b.png --> | **이도윤(25)**<br>직업: 아주대학교 4학년, B-CUBE 운영진(도메인 관리 담당)<br>소재: 경기 수원 |
 
-`migrations/000N_*.sql`을 추가하고 `npm run db:migrate:local`로 로컬에 적용합니다. 운영에는 배포 전에 `--remote`로 적용합니다. 컬럼 삭제처럼 되돌리기 어려운 변경은 백업(`wrangler d1 export bcube-domain --remote`) 후 진행하세요.
+**SCENARIO**
+`b-cube.kr` 존의 관리 권한을 가진 운영진이다. 졸업한 회원이 남긴 레코드가 수십 개 쌓여 있지만 주인이 누군지 모른다. 외부에서 "소학회 서브도메인에 이상한 페이지가 뜬다"는 제보를 받았다.
 
-## 운영 가이드
+**PAINPOINT**
+- 방치된 레코드를 찾아 정리할 근거와 수단이 없다.
+- 남용이 발견돼도 해당 회원의 레코드를 한꺼번에 회수하고 기록을 남기기 어렵다.
 
-### Cron
+**NEEDS**
+- 주인 없는 서브도메인을 시스템이 찾아 자동으로 일시 중지 <!-- → 2.2.4 -->
+- 전체 대여 현황 검색, 강제 회수, 사용자 차단, 감사 로그 조회 <!-- → 2.2.5 -->
 
-| cron (UTC) | KST | 작업 |
+---
+
+## 2.2 서비스
+
+### 제안: 규칙 기반 서브도메인 셀프 대여 · 자동 탈취 방지 콘솔 (`domain.b-cube.kr`)
+
+<!-- 캡처 필요: 내 서브도메인 목록 화면 → images/service_main.png -->
+
+회원은 학교 Google 계정(@ajou.ac.kr)으로 로그인해 1인당 최대 3개의 `<name>.b-cube.kr`을 180일 동안 빌린다. 콘솔은 Cloudflare DNS API로 레코드를 만들고, 매시간 연결 대상을 확인해 주인 없는 주소를 스스로 일시 중지한다.
+
+```mermaid
+flowchart LR
+    A["로그인<br/>@ajou.ac.kr"] --> B["이름 확인<br/>가용성 조회"] --> C["연결 대상 선택<br/>Vercel · IP · CNAME"] --> D["레코드 입력<br/>규칙 검증"] --> E["생성<br/>Cloudflare DNS"]
+    E --> F["매시간 헬스체크"]
+    F -->|7일 연속 실패| G["일시 중지<br/>레코드 제거"]
+    G -->|소유자 재확인 통과| E
+    E -->|180일 경과| H["만료<br/>30일 이름 보류"]
+```
+
+### 2.2.1 로그인과 내 서브도메인
+
+<!-- 캡처 필요: 로그인 화면, 내 서브도메인 목록 → images/screen_1.png -->
+
+#### 학교 계정 로그인
+사용자는 Google 계정으로 로그인한다. 시스템은 ID 토큰을 검증하고 이메일이 `@ajou.ac.kr`이며 인증된 주소인지 확인한다. 차단된 사용자는 거부 사유와 함께 로그인 화면으로 돌려보낸다.
+
+#### 상태 한눈에 보기
+사용자는 자신이 빌린 서브도메인을 표로 본다. 시스템은 상태(정상·일시 중지·만료)를 색 태그로, 만료일과 마지막 헬스체크 시각을 함께 보여주고, 만료 30일 이내이거나 일시 중지된 항목은 화면 상단에 안내한다. 한도(3개)에 도달하면 "새 서브도메인" 버튼을 비활성화하고 이유를 알려준다.
+
+### 2.2.2 새 서브도메인 만들기 (4단계)
+
+<!-- 캡처 필요: 이름 입력, 연결 대상 선택, 레코드 입력, 확인 단계 → images/screen_2.png -->
+
+#### 이름 즉시 확인
+사용자는 원하는 이름을 입력한다. 시스템은 입력이 멈추면(300ms) 형식(3~32자, 소문자·숫자·하이픈), 예약어(`www`, `admin`, `mail` 등 70여 개), 사칭성 금칙어(`google`, `bank` 등)를 검사하고, Cloudflare에 이 앱이 관리하지 않는 같은 이름의 레코드가 있는지 조회해 결과를 입력란 아래에 바로 표시한다.
+
+#### 연결 대상별 입력 폼
+사용자는 Vercel / 서버 IP(AWS 등) / 기타 CNAME 중 하나를 고른다. 시스템은 대상에 맞는 폼을 보여준다. Vercel은 CNAME 값이 미리 채워지고 검증 TXT 입력란이 열리며, 서버 IP는 A/AAAA를 타입별 2개까지 받는다. 입력값은 서버와 같은 검증 규칙으로 브라우저에서 먼저 확인한다(사설 IP, IP 형태의 CNAME, `b-cube.kr` 내부를 가리키는 CNAME 거부).
+
+#### 미리보기와 연결 가이드
+사용자는 만들어질 레코드를 미리보기로 확인하고 생성한다. 시스템은 Cloudflare에 레코드를 만들고(A/AAAA/CNAME은 Cloudflare 프록시 경유), 대상별 연결 가이드(예: Vercel → Settings → Domains에 주소 추가)를 보여준다.
+
+### 2.2.3 상세 · 편집 · 연장 · 반납
+
+<!-- 캡처 필요: 상세 화면(레코드, 헬스 상태, 변경 이력) → images/screen_3.png -->
+
+#### 레코드 편집
+사용자는 생성 때와 같은 폼으로 레코드를 고친다. 시스템은 "새 레코드 생성 → DB 갱신 → 기존 레코드 삭제" 순서로 교체하고, 중간에 실패하면 만든 것을 되돌려 주소가 끊기지 않게 한다.
+
+#### 연장과 반납
+사용자는 만료 30일 전부터 연장할 수 있고(180일 추가), 더 쓰지 않으면 이름을 직접 입력해 반납한다. 시스템은 반납 즉시 Cloudflare 레코드를 지운다.
+
+#### 변경 이력
+사용자는 이 서브도메인에 대한 생성·편집·헬스체크 실패·일시 중지 이력을 시간순으로 본다. 시스템은 모든 상태 변경을 감사 로그로 남긴다.
+
+### 2.2.4 자동 탈취 방지 (백그라운드)
+
+<!-- 캡처 필요: 일시 중지 안내와 재확인 버튼 → images/screen_4.png -->
+
+#### 매시간 헬스체크
+시스템은 매시간 오래 검사하지 않은 서브도메인 10개를 확인한다. CNAME 계열은 대상 이름이 실제로 조회되는지와 서브도메인 응답을 보고, Vercel·Netlify·GitHub Pages의 "연결된 사이트 없음" 응답은 실패로 판정한다. 서버 IP는 443/80 포트 연결을 확인한다.
+
+#### 자동 일시 중지와 재확인
+시스템은 하루 1회씩 실패를 세어 7일 연속 실패하면 DNS 레코드를 지우고 일시 중지한다. 이름은 소유자에게 남는다. 사용자는 서비스를 되살린 뒤 "재확인"을 눌러 통과하면 레코드가 다시 만들어진다. 30일 안에 복구하지 않으면 만료된다.
+
+#### 만료와 이름 보류
+시스템은 매일 새벽 3시(KST) 만료된 서브도메인의 레코드를 지운다. 만료·반납된 이름은 30일 동안 원래 소유자만 다시 빌릴 수 있고, 강제 회수된 이름은 누구도 빌릴 수 없다. 남이 방금 버린 이름을 가로채 사칭하는 일을 막기 위해서다.
+
+### 2.2.5 관리 화면
+
+<!-- 캡처 필요: 관리 4개 탭 → images/screen_5.png -->
+
+#### 전체 대여와 강제 회수
+운영진은 이름·소유자로 전체 대여를 검색하고, 남용이 확인되면 사유를 적어 강제 회수한다. 시스템은 레코드를 지우고 이름을 보류한다.
+
+#### 사용자 차단
+운영진은 사유를 적어 사용자를 차단한다. 시스템은 그 사용자의 세션을 모두 끊고 보유한 서브도메인을 한 번에 회수한다.
+
+#### 감사 로그와 드리프트 점검
+운영진은 작업자·작업 종류·기간으로 감사 로그를 거른다. 시스템은 매주 Cloudflare 레코드와 DB를 대조해 어긋난 항목(한쪽에만 있거나 값이 다른 레코드)을 드리프트 탭에 보여준다. 자동 삭제는 하지 않고 운영진이 판단한다.
+
+---
+
+## 2.3 유사서비스 비교
+
+| 비교 기준 | **B-CUBE Domain Console** | 도메인 직접 구매 | 공개 무료 서브도메인 서비스 (GitHub PR 신청형) | 호스팅 기본 도메인 (`*.vercel.app` 등) |
+|---|---|---|---|---|
+| 01 핵심 가치 | **소학회 소속이 드러나는 주소를 무료로, 학교 계정만으로** | 완전한 소유권 | 무료 개인 주소 | 설정 없이 즉시 사용 |
+| 02 신청·반영 | **웹 콘솔에서 즉시 생성, 규칙 자동 검증** | 등록·결제·DNS 설정을 직접 | 저장소에 PR → 관리자 검토 후 반영 | 배포 시 자동 |
+| 03 방치 레코드 관리 | **헬스체크 7일 실패 시 자동 일시 중지, 180일 만료** | 소유자 책임 | 관리자 수동 정리에 의존 | 해당 없음(호스팅 업체 관리) |
+| 04 남용 대응·기록 | **강제 회수, 사용자 차단, 전체 감사 로그** | 해당 없음 | 저장소 커밋 이력 | 해당 없음 |
+
+---
+
+# 3. 개발 개요
+
+## 3.1 데이터 활용
+
+이 서비스는 AI 모델이나 공공데이터를 쓰지 않는다. 판단에 쓰는 데이터는 내부 DB, Cloudflare DNS API, 외부 상태 확인(DoH·HTTP·TCP) 세 가지다.
+
+| # | 데이터 | 출처 | 용도 |
+|:---:|---|---|---|
+| ① | 대여·레코드·감사 로그 | 자체 DB (Cloudflare D1) | 소유자·기한·상태 관리, 한도·이름 보류 판단, 변경 이력 |
+| ② | 존의 DNS 레코드 | Cloudflare DNS API | 이름 충돌 검사, 레코드 생성·교체·삭제, 주간 드리프트 대조 |
+| ③ | 연결 대상 상태 | DoH(`cloudflare-dns.com`), 대상 HTTP 응답, TCP 연결 | 헬스체크 판정, 자동 일시 중지·재활성화 |
+
+### ① 대여·레코드·감사 로그
+
+```mermaid
+flowchart LR
+    A["입력 검증<br/>이름·레코드 규칙"] --> B["저장<br/>leases · records · audit_logs"] --> C["서비스 활용<br/>목록·한도·이름 보류·변경 이력"]
+```
+
+### ② 존의 DNS 레코드
+
+```mermaid
+flowchart LR
+    A["조회<br/>name, *.name"] --> B["충돌 판단<br/>앱이 만든 레코드만 조작"] --> C["comment 태깅<br/>bcd:lease=ID"] --> D["서비스 활용<br/>생성·교체·드리프트 점검"]
+```
+
+이 앱이 만든 레코드에는 comment로 대여 ID를 붙인다. 이 태그가 없는 레코드(메인 사이트, 메일 등)는 절대 수정하거나 삭제하지 않는다.
+
+### ③ 연결 대상 상태
+
+```mermaid
+flowchart LR
+    A["대상 확인<br/>DoH 조회 · HTTP GET · TCP 443/80"] --> B["판정<br/>벤더별 '사이트 없음' 시그니처"] --> C["서비스 활용<br/>실패 누적 → 일시 중지"]
+```
+
+```sql
+-- 대여와 레코드 (migrations/0001_init.sql 발췌)
+CREATE TABLE leases (
+  id                TEXT PRIMARY KEY,
+  name              TEXT NOT NULL,          -- 'alice' (존 이름 제외)
+  owner_email       TEXT NOT NULL REFERENCES users(email),
+  target_kind       TEXT NOT NULL,          -- 'vercel' | 'ip' | 'cname'
+  status            TEXT NOT NULL,          -- 'active' | 'suspended' | 'expired' | 'revoked' | 'released'
+  expires_at        INTEGER NOT NULL,
+  health_fail_count INTEGER NOT NULL DEFAULT 0
+  -- ...
+);
+-- 같은 이름은 active/suspended 상태로 하나만 존재
+CREATE UNIQUE INDEX uq_leases_name_live ON leases(name) WHERE status IN ('active','suspended');
+
+CREATE TABLE records (
+  id           TEXT PRIMARY KEY,
+  lease_id     TEXT NOT NULL REFERENCES leases(id),
+  cf_record_id TEXT,                        -- 일시 중지 상태에서는 NULL
+  type         TEXT NOT NULL,               -- 'A' | 'AAAA' | 'CNAME' | 'TXT'
+  host         TEXT NOT NULL,
+  content      TEXT NOT NULL,
+  proxied      INTEGER NOT NULL DEFAULT 0
+  -- ...
+);
+```
+
+---
+
+## 3.2 시스템 구축
+
+이 서비스는 AI를 쓰지 않으므로 템플릿의 "AI 서비스 구축"을 "시스템 구축"으로 바꿔 적는다. API, 화면, 예약 작업(cron)을 Cloudflare Worker 하나로 운영해 별도 서버가 없다.
+
+### 시스템 아키텍처
+
+```mermaid
+flowchart LR
+    FE["React + IBM Carbon<br/>사용자·관리 화면"] -.- BE
+    subgraph Core["Cloudflare Worker (단일 배포)"]
+        BE["Hono<br/>API · 인증 · CSRF"] -.- RDB[("D1 (SQLite)<br/>대여·세션·감사 로그")]
+        CRON["Cron 3종<br/>헬스체크 · 만료 · 드리프트"] -.- RDB
+    end
+    BE -.- GOOGLE["Google OAuth<br/>학교 계정 로그인"]
+    BE -.- CF["Cloudflare DNS API<br/>b-cube.kr 존"]
+    CRON -.- CF
+    CRON -.- PROBE["DoH · HTTP · TCP<br/>연결 대상 확인"]
+```
+
+| 구성요소 | 기술 | 역할 |
 |---|---|---|
-| `17 * * * *` | 매시 17분 | 헬스체크: 24시간 넘게 검사하지 않은 active lease 최대 10개. 하루(KST) 1회 실패 누적, 7일 연속 실패면 일시 중지 |
-| `0 18 * * *` | 매일 03:00 | 만료 처리(만료된 active, 일시 중지 30일 경과), 만료 세션 삭제 |
-| `30 18 * * SUN` | 월요일 03:30 | 드리프트 점검. 결과는 관리 → 드리프트 탭. **자동 삭제하지 않음** |
+| 런타임 | Cloudflare Workers | API, 정적 화면, cron을 하나의 배포 단위로 실행 |
+| 백엔드 | Hono, zod | 라우팅, 입력 검증(서버·화면 공용 스키마) |
+| RDB | Cloudflare D1 | 사용자, 세션(해시 저장), 대여, 레코드, 감사 로그, 드리프트 결과 |
+| DNS | Cloudflare DNS API | 레코드 생성·교체·삭제, comment 태그로 앱 관리 레코드 구분 |
+| 인증 | Google OAuth(PKCE), jose | ID 토큰 검증, `@ajou.ac.kr` 도메인 제한 |
+| 프론트엔드 | React, Vite, IBM Carbon | 목록·생성 4단계·상세·관리 4탭, 모바일 폭 지원 |
+| 상태 확인 | DoH, `cloudflare:sockets` | 헬스체크(CNAME 대상 조회, HTTP 응답, TCP 443/80) |
 
-### 자주 하는 일
+#### 보안 설계
 
-- **피싱·남용 신고**: 관리 → 전체 임대에서 강제 회수(사유 필수), 필요하면 사용자 탭에서 차단. 차단하면 세션이 모두 삭제되고 사용 중·일시 중지 lease가 일괄 회수됩니다. 회수한 이름은 30일간 누구도 신청할 수 없습니다.
-- **드리프트 정리**: 드리프트 탭의 항목은 Cloudflare 대시보드에서 직접 확인하고 정리합니다.
-  - "Cloudflare에만 있음": 이 앱의 comment(`bcd:lease=`)가 붙었지만 DB에 없는 레코드. 롤백 실패나 교체 후 삭제 실패로 남은 레코드일 가능성이 큽니다.
-  - "DB에만 있음": DB는 있다고 믿지만 Cloudflare에 없는 레코드. 대시보드에서 수동 삭제된 경우입니다. 해당 lease를 반납·회수하거나 소유자가 레코드를 다시 저장하게 하세요.
-  - "내용 다름": 대시보드에서 직접 수정된 레코드. 앱의 값이 기준입니다.
-- **예약어 추가**: 코드 수정 없이 `EXTRA_RESERVED_NAMES`(쉼표 구분)에 넣고 배포합니다. 금칙어는 `worker/data/banned-words.ts`를 고칩니다.
-- **관리자 변경**: `ADMIN_EMAILS` 수정 후 배포. 관리자 이메일은 도메인 검사를 면제받습니다(`email_verified`는 필요).
-- **API 토큰 교체**: 만료 전에 새 토큰을 발급하고 `npx wrangler secret put CF_API_TOKEN`.
+`*.b-cube.kr`의 모든 서브도메인은 콘솔과 같은 사이트(same-site)다. 회원이 빌린 서브도메인에서 콘솔을 공격하는 경우를 전제로 설계했다.
 
-### 장애 시
+- **세션 쿠키**: `__Host-` 접두사로 `Domain` 속성을 막아, 형제 서브도메인이 쿠키를 덮어쓰지 못하게 한다.
+- **CSRF**: 상태를 바꾸는 모든 요청에 `Origin` 정확히 일치와 CSRF 토큰 일치를 둘 다 요구한다. SameSite 쿠키만으로는 같은 사이트의 서브도메인 요청을 막을 수 없기 때문이다.
+- **권한 격리**: 회원은 자기 대여만 조회할 수 있고, 남의 대여 ID에는 404로 응답해 존재 여부도 숨긴다.
+- **검증**: 테스트 6개 파일 269건(규칙 단위 테스트, Workers 런타임 통합 테스트)으로 로그인 허용·거부, CSRF, 한도, Cloudflare 호출 순서와 롤백, 헬스체크·만료를 확인한다.
 
-- 모든 요청이 500 `config_error`: 설정 오류입니다. `npx wrangler tail`로 `[config]` 로그를 확인하세요. 운영에서 개발용 플래그가 켜진 경우가 대표적입니다.
-- lease 작업이 502 `dns_error`: Cloudflare API 실패입니다. 상세 원인은 `[dns]` 로그에만 남습니다. 토큰 권한(Zone DNS Edit, Zone Read)과 만료를 확인하세요.
+### 국산 대체재 후보
+
+| 구분 | 현재 사용 | 국산 대체재 후보 |
+|---|---|---|
+| 서버리스 런타임 | Cloudflare Workers | 네이버클라우드 Cloud Functions |
+| 관계형 DB | Cloudflare D1 | 네이버클라우드 Cloud DB for MySQL, NHN Cloud RDS for MySQL |
+| 권한 DNS | Cloudflare DNS | 네이버클라우드 Global DNS, NHN Cloud DNS Plus, 가비아 DNS |
+
+<!-- 대체재 제품명은 제출 전에 각 사 공식 페이지에서 현재 명칭을 확인할 것 -->
+
+---
+
+# 4. 활용 방안
+
+## 4.1 활성화 방안
+
+### ① 신규 회원 온보딩에 포함
+- 신입 회원 교육의 첫 배포 실습에서 `<이름>.b-cube.kr`을 직접 빌리게 해 사용 경험을 만든다.
+- 연결 가이드(Vercel·서버 IP·기타 CNAME)를 실습 자료로 그대로 쓴다.
+- 해커톤·프로젝트 발표 때 결과물을 소학회 주소로 공개하도록 권장한다.
+- 소학회 홈페이지나 발표 자료에 회원 서브도메인 목록을 소개해, 소학회 주소를 쓰는 일이 회원의 자부심이 되게 한다.
+
+### ② 운영 부담을 시스템으로 이전
+- 레코드 요청 창구를 메신저에서 콘솔로 일원화하고, 운영진은 관리 화면의 남용 대응과 주간 드리프트 확인만 맡는다.
+- 운영진이 바뀌어도 감사 로그와 대여 기록이 남아 인수인계가 쉽다.
+- 예약어·금칙어·한도·대여 기간을 설정값으로 두어 소학회 규모에 맞게 조정한다.
+
+### ③ 다른 소학회·학과로 확장
+- 존 이름, 허용 이메일 도메인, 한도를 설정으로 바꾸면 다른 조직의 도메인에도 같은 구조로 적용할 수 있다.
+- 운영하면서 쌓이는 벤더별 "사이트 없음" 응답 시그니처를 공유해 탈취 판정 범위를 넓힌다.
+
+<sub>출처: 프로젝트 문서 `docs/SPEC.md`, `docs/LIMITATIONS.md`</sub>
+
+---
+
+## 4.2 기대 효과
+
+1. **회원: 기다림 없이 자기 주소로 결과물을 공개한다.** 운영진 응답을 기다리지 않고 몇 분 안에 서브도메인을 만들고, 상태와 만료일을 직접 관리한다.
+2. **회원: 소학회원으로서 구성원 의식이 높아진다.** 자신의 성과물이 `b-cube.kr` 이름으로 공개되면서 회원은 소학회의 일원임을 스스로 드러내고 확인한다. 같은 도메인 아래 쌓이는 동료의 결과물은 함께 성장하는 공동체라는 인식을 만든다.
+3. **소학회: 도메인 관리가 사람의 기억에서 시스템의 기록으로 바뀐다.** 모든 레코드에 소유자와 기한이 붙고, 변경은 감사 로그로 남는다.
+4. **보안: 방치된 레코드가 탈취되기 전에 스스로 정리된다.** 헬스체크 실패 누적에 따른 자동 일시 중지와 만료로 탈취 가능한 상태가 오래 남지 않는다.
+5. **학교 커뮤니티: 학생 개발 결과물이 학교·소학회 이름으로 축적된다.** 졸업 후에도 남는 포트폴리오 주소가 소학회의 공개 이력이 된다.
+
+### 알려진 한계
+
+- 서버 IP 대상은 포트가 열려 있는지만 본다. 반납된 클라우드 IP가 다른 고객에게 재할당되면 탈취를 감지하지 못한다(토큰 파일 확인 방식 검토 중).
+- "사이트 없음" 시그니처는 Vercel·Netlify·GitHub Pages 3종이며 아직 실제 응답으로 확정하지 않았다.
+- 7일 연속 실패해야 일시 중지되므로, 그 사이 최대 6일 넘게 탈취 가능한 상태가 남을 수 있다.
+
+---
+
+<div align="center">
+
+## 경청해 주셔서 감사합니다.
+
+**B-CUBE Domain Console**
+소학회 공용 도메인의 셀프서비스 대여와 서브도메인 탈취 자동 방지
+
+<!-- {{주최 기관/협의체}} · {{대회명}} 출품작
+접수번호 {{접수번호}} · 선정기관 {{선정기관}} -->
+
+</div>
+
+---
+
+## 참고 자료
+
+- Mozilla. (n.d.). Subdomain takeovers. MDN Web Docs. https://developer.mozilla.org/en-US/docs/Web/Security/Subdomain_takeovers
+- OWASP Foundation. (n.d.). Test for Subdomain Takeover (WSTG-CONF-10). OWASP Web Security Testing Guide. https://owasp.org/www-project-web-security-testing-guide/
+- Cloudflare. (n.d.). DNS records API, Proxy status. Cloudflare Docs. https://developers.cloudflare.com/dns/
+- Vercel. (n.d.). Adding & configuring a custom domain. Vercel Docs. https://vercel.com/docs/domains
+- B-CUBE. (2026). B-CUBE Domain Console 구현 명세(SPEC), 구현 제한점(LIMITATIONS). 프로젝트 저장소 `docs/`.

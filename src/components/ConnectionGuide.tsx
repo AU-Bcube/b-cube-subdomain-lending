@@ -17,7 +17,7 @@ export function ConnectionGuide({ kind, fqdn }: { kind: TargetKind; fqdn: string
           <ListItem>
             "Verification Needed"가 뜨면 안내된 <code className="mono">_vercel</code> TXT 값을 편집에서 TXT 레코드로 추가합니다.
           </ListItem>
-          <ListItem>DNS 반영에는 보통 몇 분이 걸립니다. 인증서는 Vercel이 자동으로 발급합니다.</ListItem>
+          <ListItem>DNS 반영에는 보통 몇 분이 걸립니다. 레코드는 Cloudflare 프록시로 등록되며, 방문자 쪽 HTTPS는 Cloudflare가 처리합니다.</ListItem>
         </OrderedList>
       )}
       {kind === "ip" && (
@@ -29,9 +29,8 @@ export function ConnectionGuide({ kind, fqdn }: { kind: TargetKind; fqdn: string
             웹 서버(nginx 등)에 <code className="mono">{fqdn}</code>을 server_name으로 등록합니다.
           </ListItem>
           <ListItem>
-            프록시를 끈 경우 Let's Encrypt 등으로 인증서를 발급합니다. DNS-01 방식이면 <code className="mono">_acme-challenge.{fqdn}</code> TXT를 편집에서 추가합니다.
+            레코드는 Cloudflare 프록시로 등록되므로 방문자 쪽 HTTPS는 Cloudflare가 처리합니다. 서버 쪽 인증서가 필요하면 DNS-01 방식으로 <code className="mono">_acme-challenge.{fqdn}</code> TXT를 편집에서 추가합니다.
           </ListItem>
-          <ListItem>프록시를 켠 경우 Cloudflare가 방문자 쪽 HTTPS를 처리합니다.</ListItem>
         </OrderedList>
       )}
       {kind === "cname" && (
