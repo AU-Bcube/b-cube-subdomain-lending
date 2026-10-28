@@ -228,8 +228,20 @@ export interface LeaseAuditItem {
   detail: unknown;
 }
 
+/** 상세 화면의 Cloudflare 실제 상태 (DB 값과 비교) */
+export interface LeaseDnsState {
+  /** Cloudflare를 조회했는지. dry-run, active가 아님, 조회 실패면 false */
+  checked: boolean;
+  reason: "dry_run" | "not_active" | "error" | null;
+  /** DB 값과 다른 레코드 */
+  items: DriftItem[];
+  /** 복구 작업이 예약돼 있는지 (매시 cron이 처리) */
+  repairPending: boolean;
+}
+
 export interface LeaseDetail extends LeaseItem {
   auditLogs: LeaseAuditItem[];
+  dnsState: LeaseDnsState;
 }
 
 export interface LeasesResponse {

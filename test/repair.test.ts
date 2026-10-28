@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LeaseItem } from "../shared/schemas";
+import type { LeaseDetail, LeaseItem } from "../shared/schemas";
 import { parseConfig } from "../worker/env";
 import { createDnsClient, type DnsClient } from "../worker/services/cloudflare-dns";
 import { OP_MAX_ATTEMPTS, OP_STALE_MS } from "../worker/services/dns-ops";
@@ -139,5 +139,39 @@ describe("DNS 작업 기록과 복구 (live 모드)", () => {
     const r = await repairLease(env.DB, dns, lease.id);
     expect(r.removed).toBe(1);
     expect(cf.records.has("hand-made")).toBe(true);
+  });
+
+  it("상세 화면: Cloudflare 실제 값과 다르면 알려주고 복구를 예약한다", async () => {
+    const name = nm();
+    const lease = await create(name, [{ type: "A", host: fq(name), content: "3.3.3.3" }]);
+    const fresh = (await (await call(`/api/leases/${lease.id}`, { session: s, via })).json()) as LeaseDetail;
+    expect(fresh.dnsState).toEqual({ checked: true, reason: null, items: [], repairPending: false });
+
+    const [cfId] = await cfIds(lease.id);
+    cf.records.get(cfId!)!.content = "9.9.9.9";
+    const drifted = (await (await call(`/api/leases/${lease.id}`, { session: s, via })).json()) as LeaseDetail;
+    expect(drifted.dnsState).toMatchObject({ checked: true, repairPending: true, items: [{ kind: "mismatch", dbContent: "3.3.3.3", cfContent: "9.9.9.9" }] });
+    expect((await ops(lease.id)).map((o) => o.kind)).toEqual(["repair"]);
+
+    await recoverPendingOps(env.DB, dns, later());
+    expect(cf.records.get(cfId!)!.content).toBe("3.3.3.3");
+  });
+
+  it("상세 화면: Cloudflare 조회 실패는 화면을 막지 않는다", async () => {
+    const name = nm();
+    const lease = await create(name, [{ type: "A", host: fq(name), content: "3.3.3.3" }]);
+    cf.failWhen = (method) => method === "GET";
+    const res = await call(`/api/leases/${lease.id}`, { session: s, via });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as LeaseDetail).dnsState).toMatchObject({ checked: false, reason: "error" });
+  });
+});
+
+describe("dry-run", () => {
+  it("상세 화면은 Cloudflare를 조회하지 않는다", async () => {
+    const s = await login(`rd-${uid()}@ajou.ac.kr`);
+    const leaseId = await createLease({ name: nm(), owner: s.email, records: [{ type: "A", host: fq("x"), content: "3.3.3.3" }] });
+    const body = (await (await call(`/api/leases/${leaseId}`, { session: s })).json()) as LeaseDetail;
+    expect(body.dnsState).toEqual({ checked: false, reason: "dry_run", items: [], repairPending: false });
   });
 });

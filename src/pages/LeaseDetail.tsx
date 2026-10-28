@@ -16,7 +16,7 @@ import {
 } from "@carbon/react";
 import { useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
-import type { LeaseDetail } from "../../shared/schemas";
+import type { DriftItem, LeaseDetail } from "../../shared/schemas";
 import { ApiError } from "../api/client";
 import { leasesApi } from "../api/leases";
 import { ConnectionGuide } from "../components/ConnectionGuide";
@@ -87,6 +87,18 @@ function auditSummary(detail: unknown): string | null {
   if (typeof d.detail === "string") return d.detail;
   if (typeof d.cause === "string") return d.cause === "lease_expired" ? "대여 기간 만료" : "일시 중지 기간 초과";
   return null;
+}
+
+function driftLine(item: DriftItem): string {
+  const where = `${item.type} ${item.host}`;
+  switch (item.kind) {
+    case "mismatch":
+      return `${where}: 저장된 값 ${item.dbContent}, 실제 값 ${item.cfContent}`;
+    case "db_only":
+      return `${where}: Cloudflare에 없음 (저장된 값 ${item.dbContent})`;
+    case "cf_only":
+      return `${where}: 저장되지 않은 레코드가 있음 (${item.cfContent})`;
+  }
 }
 
 export function LeaseDetailPage() {
@@ -179,6 +191,34 @@ export function LeaseDetailPage() {
           )}
           {lease.status === "active" && lease.renewable && (
             <InlineNotification kind="warning" title="만료 임박" subtitle="만료되면 DNS 레코드가 삭제됩니다. 계속 쓰려면 연장하세요." hideCloseButton lowContrast />
+          )}
+
+          {lease.dnsState.items.length > 0 && (
+            <InlineNotification
+              kind="warning"
+              title="Cloudflare 실제 레코드가 저장된 값과 다릅니다"
+              subtitle={
+                lease.dnsState.repairPending
+                  ? "1시간 안에 저장된 값으로 자동 복구합니다. Cloudflare 대시보드에서 직접 고치지 마세요."
+                  : "관리자가 확인합니다."
+              }
+              hideCloseButton
+              lowContrast
+            >
+              <ul className="drift-lines">
+                {lease.dnsState.items.map((item) => (
+                  <li key={`${item.kind}-${item.recordId ?? item.cfRecordId}`} className="mono">
+                    {driftLine(item)}
+                  </li>
+                ))}
+              </ul>
+            </InlineNotification>
+          )}
+          {lease.dnsState.items.length === 0 && lease.dnsState.repairPending && (
+            <InlineNotification kind="info" title="DNS 복구 대기 중" subtitle="끝나지 않은 DNS 작업이 있어 1시간 안에 저장된 값으로 맞춥니다." hideCloseButton lowContrast />
+          )}
+          {lease.dnsState.reason === "error" && (
+            <InlineNotification kind="info" title="실제 상태를 확인하지 못했습니다" subtitle="Cloudflare 조회에 실패했습니다. 아래 레코드는 저장된 값입니다." hideCloseButton lowContrast />
           )}
 
           {live && (
