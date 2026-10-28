@@ -40,6 +40,7 @@
 | 3.5 | CSP는 Carbon 때문에 `style-src 'unsafe-inline'`을 허용한다. | SPEC 값 그대로 |
 | 3.6 | 실제 Google 계정 로그인과 `hd` 클레임 존재 여부는 아직 확인하지 않았다. | 체크리스트 7번 (사용자) |
 | 3.7 | 소유자 화면의 변경 이력은 최근 100건만 보이고, 작업자 이메일·IP는 숨긴다(역할만 표시). | 관리자 감사 로그에는 모두 남는다 |
+| 3.8 | 폰트(IBM Plex Sans KR, D2Coding)를 외부 CDN(jsDelivr)에서 불러온다. D2Coding은 subset이라 KS X 1001 밖 한글(예: 똠, 햏)은 다른 글꼴로 표시된다. 방문자 IP와 Referer가 jsDelivr에 전달된다. | jsDelivr 장애나 차단 시 시스템 글꼴로 대체될 뿐 기능은 동작한다. SRI로 변조된 CSS는 막는다. CDN 속도 비교는 한 회선(Cloudflare ICN)에서만 측정했다 |
 
 ## 4. 데이터 보존
 

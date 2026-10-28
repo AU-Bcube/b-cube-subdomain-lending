@@ -1,10 +1,12 @@
-// IBM Plex Sans KR을 @fontsource로 셀프 호스팅하므로 Carbon 기본 font-face(IBM Plex Sans)는 끈다.
+// IBM Plex Sans KR은 index.html에서 jsDelivr CDN으로 불러오므로 Carbon 기본 font-face(IBM Plex Sans)는 끈다.
 @use '@carbon/react/scss/config' with (
   $css--font-face: false
 );
 @use '@carbon/react';
 
 $font-sans: 'IBM Plex Sans KR', 'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+// D2Coding은 index.html에서 jsDelivr CDN으로 불러온다.
+$font-mono: 'D2Coding', ui-monospace, SFMono-Regular, Menlo, monospace;
 
 html,
 body {
@@ -164,14 +166,14 @@ select {
 .json-detail {
   margin: 0;
   padding: 0.5rem 0;
-  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: $font-mono;
   font-size: 0.75rem;
   white-space: pre-wrap;
   word-break: break-all;
 }
 
 .mono {
-  font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: $font-mono;
   font-size: 0.875rem;
 }
 
@@ -326,7 +328,7 @@ select {
     max-height: 16rem;
     overflow: auto;
     background: var(--cds-layer-01);
-    font-family: 'IBM Plex Mono', ui-monospace, monospace;
+    font-family: $font-mono;
     font-size: 0.75rem;
   }
 }

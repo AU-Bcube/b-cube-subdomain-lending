@@ -187,7 +187,9 @@
 | Vercel CNAME 값 형식 | 3.7 | 확인 (2026-10-27). 문서상 프로젝트별 값은 `d1d4fc829fe7bc7c.vercel-dns-017.com` 형태. SPEC의 `*.vercel-dns.com`만으로는 막히므로 `*.vercel-dns-<숫자>.com`도 허용 |
 | Cloudflare 무료 플랜 레코드 comment 길이 제한 | 4.3 | 공식 문서 미확인. 현재 comment 46자로 알려진 제한(100자) 안 |
 | 벤더별 "주인 없음" 응답 시그니처 | 7.4 | 미확인. 추정 시그니처로 구현(LIMITATIONS 1.3) |
-| CSP를 셀프 호스팅 기준에서 조정했는지 | 2.7 | SPEC 값 그대로 적용 |
+| CSP를 셀프 호스팅 기준에서 조정했는지 | 2.7 | 조정 (2026-10-28). 폰트를 jsDelivr CDN으로 옮기며 `style-src`, `font-src`에 `https://cdn.jsdelivr.net` 추가 |
+| 폰트 CDN 선택 (한국 기준 최속) | 1.x | 완료 (2026-10-28). 셀프 호스팅(`@fontsource` 번들)에서 jsDelivr `@fontsource/ibm-plex-sans-kr@5.3.0`로 전환, SRI(sha384) 적용, 패키지 제거. 한국(Cloudflare ICN) 측정: jsDelivr woff2 약 35ms, Google Fonts(`fonts.gstatic.com`) 약 170ms, cdnfonts CSS 약 210ms. 측정은 한 회선 기준 |
+| 코드 표시 폰트 D2Coding | 5.x | 완료 (2026-10-28). jsDelivr `d2coding@1.3.2` subset CSS(SRI 적용), `styles.scss`의 `$font-mono`로 `.mono`, `.json`, `.json-detail`에 적용. Carbon 내장 컴포넌트의 코드 글꼴(IBM Plex Mono 지정)은 바꾸지 않음 |
 | 운영 500 로그에 오류 메시지가 빠짐 | 2.x | 해결 (2026-10-28). `app.onError`가 `err.message`와 `cause`를 따로 남김 (`worker/app.ts`) |
 | 테스트가 `wrangler.jsonc`의 운영 `REQUIRE_HD=true`에 영향받음 | 2.x | 해결 (2026-10-28). `vitest.config.ts` 바인딩에 `REQUIRE_HD`, `EXTRA_RESERVED_NAMES` 고정 |
 | 실제 Google 계정 로그인과 `hd` 클레임 (체크리스트 7번) | 2.1, 2.2, 2.8 | 미확인. 사용자가 브라우저에서 직접 로그인해야 한다. 로컬 `/auth/login`이 Google로 올바른 파라미터(PKCE, `redirect_uri=http://localhost:5173/auth/callback`)와 함께 리다이렉트하는 것까지 확인 (2026-10-27) |
@@ -216,6 +218,8 @@
 | 2026-10-27: 연장·재확인·반납 가능 상태, 재확인 1분 제한과 실패 미집계, suspended 재확인 방식, 소유자용 감사 로그 범위 | §9 |
 | 2026-10-27: suspended 만료는 매일 만료 cron에서 처리, 실패 집계는 KST 하루 1회 | §10.2 |
 | 2026-10-27: dry-run 드리프트 결과 안내 | §10.3 |
+| 2026-10-28: 코드 표시 폰트 D2Coding (jsDelivr) | 디자인 |
+| 2026-10-28: 폰트를 jsDelivr CDN에서 불러오고 CSP에 `cdn.jsdelivr.net` 추가 | §6.4, 디자인 |
 | 2026-10-28: 드리프트 cron 요일을 `0`에서 `SUN`으로 변경 (Cloudflare cron은 요일 `0`을 받지 않음) | §4, §10.3 |
 
 ## 5. 다음 작업
