@@ -301,6 +301,7 @@ describe("cron: 드리프트 점검", () => {
       dryRun: false,
       listByName: async () => [],
       listManaged: async () => [cfRec({ id: "cf-orphan", comment: "bcd:lease=deleted" })],
+      listByLease: async () => [],
       create: vi.fn(),
       update: vi.fn(),
       remove: vi.fn(),

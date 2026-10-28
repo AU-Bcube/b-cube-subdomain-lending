@@ -2,73 +2,12 @@
  * 드리프트 점검 (SPEC §10.3). 매주 `30 18 * * SUN`.
  * Cloudflare의 `bcd:lease=` 레코드와 DB records(cf_record_id가 있는 행)를 비교한다. 자동 삭제는 하지 않는다.
  */
-import { normalizeHostname, parseIPv6 } from "../../shared/rules";
-import type { DriftItem } from "../../shared/schemas";
 import { auditStatement } from "../services/audit";
-import { LEASE_COMMENT_PREFIX, type CfDnsRecord, type DnsClient } from "../services/cloudflare-dns";
+import type { CfDnsRecord, DnsClient } from "../services/cloudflare-dns";
+import { diffRecords } from "../services/drift";
 import type { RecordRow } from "../services/leases";
 
-function leaseIdFromComment(comment: string | null): string | null {
-  return comment?.startsWith(LEASE_COMMENT_PREFIX) ? comment.slice(LEASE_COMMENT_PREFIX.length) : null;
-}
-
-/** Cloudflare가 돌려주는 값과 DB 값을 같은 형태로 맞춘다. */
-export function normalizeContent(type: string, content: string): string {
-  switch (type) {
-    case "CNAME":
-      return normalizeHostname(content);
-    case "AAAA": {
-      const n = parseIPv6(content);
-      return n === null ? content.toLowerCase() : n.toString(16);
-    }
-    case "TXT":
-      // API가 TXT 값을 따옴표로 감싸 돌려주는 경우가 있다.
-      return /^".*"$/s.test(content) ? content.slice(1, -1) : content;
-    default:
-      return content;
-  }
-}
-
-export function diffRecords(cf: readonly CfDnsRecord[], db: readonly RecordRow[]): DriftItem[] {
-  const items: DriftItem[] = [];
-  const byCfId = new Map(cf.map((r) => [r.id, r]));
-  const dbCfIds = new Set<string>();
-
-  for (const row of db) {
-    if (row.cf_record_id === null) continue;
-    dbCfIds.add(row.cf_record_id);
-    const remote = byCfId.get(row.cf_record_id);
-    const base = { type: row.type, host: row.host, leaseId: row.lease_id, recordId: row.id, cfRecordId: row.cf_record_id };
-    if (!remote) {
-      items.push({ ...base, kind: "db_only", dbContent: row.content, cfContent: null, dbProxied: row.proxied === 1, cfProxied: null });
-      continue;
-    }
-    const same =
-      remote.type === row.type &&
-      normalizeHostname(remote.name) === row.host &&
-      normalizeContent(row.type, remote.content) === normalizeContent(row.type, row.content) &&
-      remote.proxied === (row.proxied === 1);
-    if (!same) {
-      items.push({ ...base, kind: "mismatch", dbContent: row.content, cfContent: remote.content, dbProxied: row.proxied === 1, cfProxied: remote.proxied });
-    }
-  }
-  for (const remote of cf) {
-    if (dbCfIds.has(remote.id)) continue;
-    items.push({
-      kind: "cf_only",
-      type: remote.type,
-      host: normalizeHostname(remote.name),
-      leaseId: leaseIdFromComment(remote.comment),
-      recordId: null,
-      cfRecordId: remote.id,
-      dbContent: null,
-      cfContent: remote.content,
-      dbProxied: null,
-      cfProxied: remote.proxied,
-    });
-  }
-  return items;
-}
+export { diffRecords, normalizeContent } from "../services/drift";
 
 export async function runReconcile(db: D1Database, dns: DnsClient, now = Date.now()): Promise<{ ok: boolean; driftCount: number }> {
   let cf: CfDnsRecord[];

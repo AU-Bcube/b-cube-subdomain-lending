@@ -211,10 +211,15 @@ export function fakeCloudflare(fetchSpy: { mockImplementation: (fn: typeof fetch
 
     if (method === "GET") {
       state.calls.push(`GET ${u.searchParams.toString().replace(/&?(page|per_page)=\d+/g, "")}`);
+      if (state.failWhen?.("GET", {})) return fail();
       const name = u.searchParams.get("name");
       const prefix = u.searchParams.get("comment.startswith");
+      const exact = u.searchParams.get("comment.exact");
       const list = [...state.records.values()].filter(
-        (r) => (name === null || r.name === name) && (prefix === null || (r.comment ?? "").startsWith(prefix)),
+        (r) =>
+          (name === null || r.name === name) &&
+          (prefix === null || (r.comment ?? "").startsWith(prefix)) &&
+          (exact === null || r.comment === exact),
       );
       return ok(list, { result_info: { page: 1, total_pages: 1 } });
     }
