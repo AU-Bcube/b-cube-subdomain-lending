@@ -8,7 +8,7 @@ export default defineConfig({
     cloudflareTest(async () => ({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
-        // 개인 .dev.vars와 무관하게 테스트 설정을 고정한다.
+        // 개인 .dev.vars, 운영 값을 채운 wrangler.jsonc vars와 무관하게 테스트 설정을 고정한다.
         bindings: {
           APP_ORIGIN: "http://localhost:5173",
           DNS_DRY_RUN: "true",
@@ -19,6 +19,8 @@ export default defineConfig({
           CF_ZONE_ID: "",
           CF_API_TOKEN: "",
           ADMIN_EMAILS: "t-admin@ajou.ac.kr",
+          REQUIRE_HD: "false",
+          EXTRA_RESERVED_NAMES: "",
           TEST_MIGRATIONS: await readD1Migrations("./migrations"),
         },
       },
