@@ -2,7 +2,7 @@
  * 연결 대상별 레코드 입력 폼. 생성 3단계와 상세 화면 편집에서 함께 쓴다.
  * 검증은 서버와 같은 shared/rules.ts의 validateRecordSet으로 먼저 한다.
  */
-import { Button, InlineNotification, Select, SelectItem, Stack, TextInput, Toggle } from "@carbon/react";
+import { Button, InlineNotification, Select, SelectItem, Stack, TextInput } from "@carbon/react";
 import { Add, TrashCan } from "@carbon/icons-react";
 import {
   MAX_IP_RECORDS_PER_TYPE,
@@ -19,8 +19,6 @@ import type { RecordFieldError, RecordView } from "../../shared/schemas";
 export interface RecordsForm {
   cname: string;
   ips: Array<{ key: string; type: "A" | "AAAA"; content: string }>;
-  /** ip 타입의 A/AAAA 전체에 적용 */
-  proxied: boolean;
   txts: Array<{ key: string; host: string; content: string }>;
 }
 
@@ -44,7 +42,6 @@ export function emptyForm(kind: TargetKind): RecordsForm {
   return {
     cname: kind === "vercel" ? VERCEL_DEFAULT_CNAME : "",
     ips: kind === "ip" ? [{ key: newKey(), type: "A", content: "" }] : [],
-    proxied: false,
     txts: [],
   };
 }
@@ -55,7 +52,6 @@ export function formFromRecords(kind: TargetKind, records: readonly RecordView[]
   const ips = records.filter((r): r is RecordView & { type: "A" | "AAAA" } => r.type === "A" || r.type === "AAAA");
   if (kind === "ip") {
     form.ips = ips.length ? ips.map((r) => ({ key: newKey(), type: r.type, content: r.content })) : form.ips;
-    form.proxied = ips.some((r) => r.proxied);
   }
   form.txts = records.filter((r) => r.type === "TXT").map((r) => ({ key: newKey(), host: r.host, content: r.content }));
   return form;
@@ -68,7 +64,7 @@ export function formToRecords(kind: TargetKind, fqdn: string, form: RecordsForm)
   if (kind === "ip") {
     for (const ip of form.ips) {
       if (!ip.content.trim()) continue;
-      records.push({ type: ip.type, host: fqdn, content: ip.content.trim(), proxied: form.proxied });
+      records.push({ type: ip.type, host: fqdn, content: ip.content.trim() });
       keys.push(ip.key);
     }
   } else {
@@ -199,16 +195,8 @@ export function RecordsEditor({ kind, name, zone, form, errors, onChange }: Reco
                 IP 추가
               </Button>
             </div>
-            <Toggle
-              id="record-proxied"
-              labelText="Cloudflare 프록시"
-              labelA="끔 (DNS만)"
-              labelB="켬 (주황 구름)"
-              toggled={form.proxied}
-              onToggle={(checked) => set({ proxied: checked })}
-            />
             <p className="cds--form__helper-text">
-              프록시를 켜면 방문자는 Cloudflare를 거쳐 접속하고 서버 IP가 드러나지 않습니다. 서버의 80/443 포트만 프록시됩니다.
+              A, AAAA, CNAME 레코드는 항상 Cloudflare 프록시(주황 구름)로 등록됩니다. 방문자는 Cloudflare를 거쳐 접속하고 서버 IP가 드러나지 않습니다. 서버의 80/443 등 HTTP(S) 포트만 프록시됩니다.
             </p>
           </Stack>
         </fieldset>
