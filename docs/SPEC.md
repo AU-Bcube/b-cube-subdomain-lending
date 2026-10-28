@@ -11,7 +11,7 @@
 2. **운영 환경에 영향을 주는 명령은 실행 전에 반드시 사용자 확인을 받는다.**
    - 대상: `wrangler deploy`, `wrangler d1 migrations apply --remote`, `wrangler secret put`, 실제 Cloudflare DNS API 호출
 3. **시크릿을 코드, 커밋, 로그에 절대 남기지 않는다.** `.dev.vars`는 `.gitignore`에 넣고, `.dev.vars.example`만 커밋한다.
-4. **이 앱이 생성하지 않은 DNS 레코드는 절대 수정하거나 삭제하지 않는다.** DB에 `cf_record_id`가 있는 레코드만 조작한다.
+4. **이 앱이 생성하지 않은 DNS 레코드는 절대 수정하거나 삭제하지 않는다.** 이 앱이 만들었다는 근거가 DB에 있는 레코드만 조작한다: `records.cf_record_id` 또는 DNS 작업 기록 `dns_ops.cf_ids`(§8). comment(`bcd:lease=`)만 같은 레코드는 근거가 아니다.
 5. 로컬 개발에서는 `DNS_DRY_RUN=true`가 기본값이다. 이 값이 true이면 Cloudflare API를 호출하지 않고 가짜 record id를 반환하며 로그만 남긴다.
 6. 언어는 **TypeScript (strict)** 를 쓴다. 런타임은 Cloudflare Workers이고, Node 전용 API는 `nodejs_compat` 범위 안에서만 쓴다.
 7. 외부 서비스 형식(Vercel 검증 TXT 형식, Cloudflare API 필드 제한 등)은 **구현 시점에 공식 문서로 확인**하고, 이 문서와 다르면 보고한다.
@@ -272,6 +272,9 @@ CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
 ```
 
 - `migrations/0002_suspended_at.sql`: `leases.suspended_at INTEGER` (suspended로 바뀐 시각). §10.2의 "suspended 상태로 `NAME_HOLD_DAYS` 경과" 판단에 쓴다.
+- `migrations/0003_dns_ops.sql`:
+  - `dns_ops(id, lease_id, kind, cf_ids, started_at, attempts, last_error)`: DNS 작업 기록(§8). `cf_ids`는 이 작업이 만들었거나 지워야 할 Cloudflare 레코드 id(JSON 배열)다.
+  - `reconcile_runs.repaired TEXT`: 드리프트 점검의 자동 복구 결과(JSON, §10.3).
 
 **감사 로그 action 목록**: `auth.login`, `auth.login_denied`, `auth.logout`, `lease.create`, `lease.update_records`, `lease.renew`, `lease.release`, `lease.recheck`, `lease.reactivate`, `system.health_fail`, `system.suspend`, `system.expire`, `admin.revoke`, `admin.ban`, `admin.unban`, `system.drift_detected`
 
@@ -386,16 +389,26 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 ## 8. Cloudflare DNS 서비스 (`services/cloudflare-dns.ts`)
 
 - Base URL은 `https://api.cloudflare.com/client/v4/zones/${CF_ZONE_ID}/dns_records`이고, `Authorization: Bearer ${CF_API_TOKEN}` 헤더를 붙인다.
-- 제공 함수: `listByName(fqdn)`, `create(record)`, `update(id, record)`, `remove(id)`, `listManaged()`
+- 제공 함수: `listByName(fqdn)`, `create(record)`, `update(id, record)`, `remove(id)`, `listManaged()`, `listByLease(leaseId)` (`comment.exact` 필터)
 - 레코드 **comment**에는 `bcd:lease=<leaseId>`를 기록한다. 짧게 유지하고 이메일 등 개인정보는 넣지 않는다. 무료 플랜의 comment 길이 제한은 구현 시 확인한다.
 - `DNS_DRY_RUN=true`이면 네트워크를 호출하지 않고 `dry_<uuid>` id를 반환하며 콘솔 로그만 남긴다.
 - 실패하면 Cloudflare 오류 메시지를 사용자에게 그대로 노출하지 않는다. 일반화한 메시지로 응답하고 상세 내용은 서버 로그에만 남긴다.
 - **일관성 보장**
   - 레코드 세트를 교체할 때는 순서를 지킨다: 1) 새 레코드 생성 → 2) DB 갱신 → 3) 기존 레코드 삭제.
-  - 중간에 실패하면 생성한 것을 롤백한다. 그래도 남는 불일치는 reconcile cron이 감지한다.
+  - 중간에 실패하면 생성한 것을 롤백한다. 그래도 남는 불일치는 아래 작업 기록으로 복구한다.
   - D1 batch로 DB 갱신을 원자적으로 처리한다.
   - 내용이 같은 레코드는 건드리지 않는다. CNAME은 같은 host에 둘 이상 둘 수 없어 "생성 후 삭제"가 불가능하므로 기존 레코드를 수정(PATCH)하고, 실패하면 원래 값으로 되돌린다.
-  - 3) 기존 레코드 삭제가 실패해도 작업은 성공으로 응답한다. 남은 레코드는 드리프트 점검이 감지한다.
+  - 3) 기존 레코드 삭제가 실패해도 작업은 성공으로 응답한다. 남은 레코드는 작업 기록에 남아 매시 복구된다.
+- **DNS 작업 기록 (`dns_ops`, intent log)** (`services/dns-ops.ts`, `services/repair.ts`)
+  - Cloudflare를 바꾸는 작업(생성, 교체, 재활성화, 반납, 회수, 만료, suspend)은 시작 전에 `dns_ops` 행을 쓴다. 만든 레코드 id는 만든 직후 `cf_ids`에 더한다.
+  - 행은 DB 반영과 **같은 batch**에서 지운다. 롤백을 모두 마쳤을 때도 지운다. 교체는 DB 반영 시 `cf_ids`를 "지울 기존 레코드"로 바꾸고, 삭제까지 끝나면 지운다.
+  - 남은 행은 중간에 실패했거나 Worker가 끊긴 작업이다. 매시 cron(§10.2)이 10분 넘게 남은 행의 lease를 **DB 기준으로 복구**한다(`repairLease`):
+    - `cf_ids` 중 DB records가 참조하지 않는 레코드 → 삭제
+    - lease가 active가 아님(suspended, 종료, 없음) → DB가 참조하는 레코드 삭제, `cf_record_id=NULL`
+    - lease가 active → `listByLease`로 실제 상태를 보고, 없는 레코드는 다시 만들고 내용이 다르면 DB 값으로 되돌린다(dry-run에서는 건너뜀)
+    - 바뀐 것이 있으면 감사 로그 `system.dns_repair`
+  - 복구에 실패하면 `attempts`와 `last_error`를 남긴다. 5번 넘게 실패한 행은 더 시도하지 않고 관리자 드리프트 탭에 표시한다.
+  - DB 상태가 기준이므로, 반납·회수 도중 실패해 lease가 active로 남으면 복구는 레코드를 다시 만든다. 사용자는 반납을 다시 하면 된다.
 
 ## 9. API 명세
 
@@ -418,7 +431,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 | GET | `/api/me` | `{ email, name, isAdmin, csrfToken, zone, limits: { max, used } }`. `zone`은 `ZONE_NAME`(예: `b-cube.kr`)이며 화면에서 FQDN을 표시할 때 쓴다 |
 | GET | `/api/names/:name/availability` | `{ available, reason? }`. 이유 코드: `invalid_format`, `reserved`, `banned_word`, `taken`, `held`, `conflict` |
 | GET | `/api/leases` | 내 lease 목록 (records 포함) |
-| GET | `/api/leases/:id` | 상세 + 해당 lease의 감사 로그 |
+| GET | `/api/leases/:id` | 상세 + 해당 lease의 감사 로그 + `dnsState`(Cloudflare 실제 상태). active lease만 `listByLease`로 1회 조회해 DB 값과 비교한다. "DB에만 있음"·"내용 다름"이 있으면 복구 작업을 예약한다(`dns_ops` kind `repair`). 조회 실패는 `checked:false, reason:'error'`로 응답하고 화면은 그대로 보여 준다 |
 | POST | `/api/leases` | `{ name, targetKind, records[] }` → 생성. **1인당 한도**: active+suspended 개수가 `MAX_LEASES_PER_USER` 이상이면 409 `limit_reached` |
 | PUT | `/api/leases/:id/records` | 레코드 세트 전체 교체. active 상태에서만 가능 |
 | POST | `/api/leases/:id/renew` | 만료 `RENEW_WINDOW_DAYS` 이내일 때만 가능. `expires_at = now + LEASE_DAYS` |
@@ -473,11 +486,16 @@ lease 하나(`alice`)의 레코드 구성 규칙:
   - suspended 상태로 `NAME_HOLD_DAYS`가 지나면 → `expired`로 전환한다.
     - 이 전환과 "suspended인데 `expires_at`이 지난 lease"의 만료는 매일 만료 cron(§10.1)에서 처리한다. `status_reason`은 `lease_expired` 또는 `suspended_too_long`이다.
   - 실패 횟수와 `system.health_fail` 기록은 KST 기준 하루 1회다.
+- 헬스체크 뒤에 남은 DNS 작업 기록을 복구한다(§8, 한 번에 최대 20개).
 
 ### 10.3 드리프트 점검: 매주 `30 18 * * SUN`
 - Cloudflare에서 comment가 `bcd:lease=`인 레코드 목록과 DB records를 비교한다.
-- Cloudflare에만 있거나, DB에만 있거나, 내용이 다른 레코드를 감지하면 감사 로그 `system.drift_detected`에 남기고 관리자 드리프트 탭에 표시한다.
-- **자동 삭제는 하지 않는다.**
+- 비교 후 **안전한 경우만 자동 복구**한다(`repairLease`, dry-run 제외).
+  - 남은 DNS 작업 기록
+  - "DB에만 있음", "내용 다름": DB 값으로 다시 만들거나 되돌린다(lease가 active가 아니면 지운다)
+  - active가 아닌 lease가 아직 참조하는 레코드: 지운다(탈취 방지)
+- **"Cloudflare에만 있음"은 자동 삭제하지 않는다.** 이 앱이 만들었다는 근거가 DB에 없기 때문이다(§0-4). 작업 기록에 id가 있는 레코드는 위 작업 기록 복구가 지운다.
+- 복구 후 다시 비교한 결과를 저장한다. 남은 항목이 있으면 감사 로그 `system.drift_detected`에 남기고 관리자 드리프트 탭에 표시한다. 복구 결과는 `reconcile_runs.repaired`에 남긴다.
 - Cloudflare cron은 요일 `0`을 받지 않는다(1–7 또는 `SUN`–`SAT`, 1=일요일). 그래서 `SUN`으로 쓴다.
 - `DNS_DRY_RUN=true`에서는 Cloudflare를 조회하지 않으므로 결과에 그 사실을 `error` 문구로 남긴다(모든 레코드가 DB에만 있음으로 나온다).
 
@@ -506,11 +524,12 @@ lease 하나(`alice`)의 레코드 구성 규칙:
    - 생성 후 대상별 **연결 가이드**를 표시한다. 예: Vercel 프로젝트 → Settings → Domains에서 `alice.b-cube.kr` 추가
 4. **상세** (`/leases/:id`): 레코드 목록, 편집 폼(위 3단계 재사용), 헬스 상태, 이 lease의 감사 로그 타임라인
    - 반납은 `Modal danger`를 띄우고, 이름을 직접 입력해야 버튼이 활성화된다.
+   - `dnsState`가 DB 값과 다르면 경고와 차이를 보여 준다. 복구가 예약됐으면 "1시간 안에 자동 복구"를 안내한다.
 5. **관리** (`/admin`): `Tabs` 4개
    - **전체 임대**: 검색/필터 `DataTable`, 행별 "강제 회수"(사유 `TextArea` 필수인 Modal)
    - **사용자**: 검색, 보유 수, 차단/해제(사유 필수)
    - **감사 로그**: 필터(작업자/액션/기간), 페이지네이션, detail JSON 펼쳐보기
-   - **드리프트**: 최근 reconcile 결과
+   - **드리프트**: 최근 reconcile 결과, 자동 복구 결과, 끝나지 않은 DNS 작업 기록
 - 모든 폼은 `shared/schemas.ts`의 zod 스키마로 클라이언트에서 먼저 검증하고, 서버에서 다시 검증한다.
 - 에러는 `ToastNotification`, 로딩은 `DataTableSkeleton`/`InlineLoading`으로 처리한다.
 
