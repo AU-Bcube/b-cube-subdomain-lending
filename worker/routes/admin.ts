@@ -11,6 +11,7 @@ import {
   type DriftItem,
   type DriftRepairSummary,
   type DriftResponse,
+  type RecoverOpsResponse,
   type Paged,
 } from "../../shared/schemas";
 import { apiError } from "../lib/http";
@@ -18,6 +19,8 @@ import { requireAdmin, requireUser } from "../middleware/auth";
 import { auditStatement, requestMeta, writeAudit } from "../services/audit";
 import { createDnsClient, DnsError } from "../services/cloudflare-dns";
 import type { DnsOpRow } from "../services/dns-ops";
+import { acquireLock, getLock, RECOVER_LOCK, RECOVER_LOCK_MS } from "../services/job-lock";
+import { changedCount, recoverPendingOps } from "../services/repair";
 import {
   getLease,
   getRecordsByLease,
@@ -360,6 +363,7 @@ export const adminRoutes = new Hono<HonoEnv>()
       repaired: string | null;
     }>();
     const { results: ops } = await db.prepare(`SELECT * FROM dns_ops ORDER BY started_at LIMIT 100`).all<DnsOpRow>();
+    const lock = await getLock(db, RECOVER_LOCK, RECOVER_LOCK_MS);
     const body: DriftResponse = {
       run: row
         ? {
@@ -380,6 +384,33 @@ export const adminRoutes = new Hono<HonoEnv>()
         attempts: op.attempts,
         lastError: op.last_error,
       })),
+      recoverLock: lock,
     };
+    return c.json(body);
+  })
+
+  // 끝나지 않은 DNS 작업 기록 수동 복구. cron과 겹치지 않게 마지막 실행(cron 포함) 뒤 3분 동안은 거부한다.
+  // 시도 상한을 넘은 작업도 다시 시도한다(관리자가 원인을 고친 뒤 누르는 버튼).
+  .post("/dns-ops/recover", async (c) => {
+    const db = c.env.DB;
+    const now = Date.now();
+    const lock = await acquireLock(db, RECOVER_LOCK, "manual", RECOVER_LOCK_MS, now);
+    if (!lock.ok) {
+      const retryAfterSec = Math.max(1, Math.ceil((lock.lock.availableAt - now) / 1000));
+      c.header("Retry-After", String(retryAfterSec));
+      return c.json(
+        {
+          error: {
+            code: "recover_too_soon",
+            message: `${lock.lock.trigger === "cron" ? "정기 복구" : "수동 복구"}가 방금 실행됐습니다. ${retryAfterSec}초 후 다시 시도하세요.`,
+          },
+          retryAfterSec,
+        },
+        429,
+      );
+    }
+    const r = await recoverPendingOps(db, createDnsClient(c.var.config), now, { retryExhausted: true });
+    const body: RecoverOpsResponse = { recovered: r.recovered, failed: r.failed, changedLeases: r.results.filter((x) => changedCount(x) > 0).length };
+    await writeAudit(db, { action: "admin.dns_recover", actorEmail: c.var.user.email, actorRole: "admin", detail: body, ...requestMeta(c), at: now });
     return c.json(body);
   });

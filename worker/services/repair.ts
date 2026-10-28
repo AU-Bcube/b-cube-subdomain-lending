@@ -85,18 +85,26 @@ export async function repairLease(
 }
 
 /**
- * 남은 작업 기록 복구 (매시 cron). OP_STALE_MS보다 오래된 행만 처리한다.
+ * 남은 작업 기록 복구 (매시 cron, 관리자 수동 실행).
+ * OP_STALE_MS보다 오래된 행만 처리한다. 진행 중인 작업과 겹치지 않게 하기 위해서다.
+ * 단, 복구 예약(`repair`)은 진행 중인 작업이 아니므로 바로 처리한다.
  * 성공하면 행을 지우고, 실패하면 시도 횟수와 오류를 남긴다.
+ *
+ * `retryExhausted`이면 시도 상한(OP_MAX_ATTEMPTS)을 넘은 행도 다시 시도한다(관리자가 원인을 고친 뒤 수동 실행).
+ * 동시 실행 방지는 호출하는 쪽이 잠금(services/job-lock.ts)으로 한다.
  */
 export async function recoverPendingOps(
   db: D1Database,
   dns: DnsClient,
   now = Date.now(),
-  limit = 20,
+  opts: { limit?: number; retryExhausted?: boolean } = {},
 ): Promise<{ recovered: number; failed: number; results: RepairResult[] }> {
   const { results: ops } = await db
-    .prepare(`SELECT * FROM dns_ops WHERE started_at < ? AND attempts < ? ORDER BY started_at LIMIT ?`)
-    .bind(now - OP_STALE_MS, OP_MAX_ATTEMPTS, limit)
+    .prepare(
+      `SELECT * FROM dns_ops WHERE (started_at < ? OR kind = 'repair') AND (attempts < ? OR ?)
+        ORDER BY started_at LIMIT ?`,
+    )
+    .bind(now - OP_STALE_MS, OP_MAX_ATTEMPTS, opts.retryExhausted ? 1 : 0, opts.limit ?? 20)
     .all<DnsOpRow>();
   let recovered = 0;
   let failed = 0;

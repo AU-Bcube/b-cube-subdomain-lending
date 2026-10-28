@@ -1,11 +1,14 @@
-import { env } from "cloudflare:test";
+import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LeaseDetail, LeaseItem } from "../shared/schemas";
+import type { DriftResponse, LeaseDetail, LeaseItem } from "../shared/schemas";
+import { CRON_HEALTH } from "../worker/cron";
+import worker from "../worker/index";
 import { parseConfig } from "../worker/env";
 import { createDnsClient, type DnsClient } from "../worker/services/cloudflare-dns";
-import { OP_MAX_ATTEMPTS, OP_STALE_MS } from "../worker/services/dns-ops";
+import { OP_MAX_ATTEMPTS, OP_STALE_MS, queueRepair } from "../worker/services/dns-ops";
+import { RECOVER_LOCK_MS } from "../worker/services/job-lock";
 import { recoverPendingOps, repairLease } from "../worker/services/repair";
-import { call, createLease, fakeCloudflare, LIVE_DNS, login, uid, workerWith, type FakeCloudflare, type Session } from "./helpers";
+import { ADMIN_EMAIL, auditFor, call, createLease, fakeCloudflare, LIVE_DNS, login, uid, workerWith, type FakeCloudflare, type Session } from "./helpers";
 
 const ZONE = "b-cube.kr";
 const fq = (name: string) => `${name}.${ZONE}`;
@@ -32,6 +35,12 @@ async function cfIds(leaseId: string) {
 }
 
 afterEach(() => vi.restoreAllMocks());
+
+async function runCron(cron: string) {
+  const ctx = createExecutionContext();
+  await worker.scheduled(createScheduledController({ cron, scheduledTime: Date.now() }), env, ctx);
+  await waitOnExecutionContext(ctx);
+}
 
 describe("DNS 작업 기록과 복구 (live 모드)", () => {
   let cf: FakeCloudflare;
@@ -173,5 +182,91 @@ describe("dry-run", () => {
     const leaseId = await createLease({ name: nm(), owner: s.email, records: [{ type: "A", host: fq("x"), content: "3.3.3.3" }] });
     const body = (await (await call(`/api/leases/${leaseId}`, { session: s })).json()) as LeaseDetail;
     expect(body.dnsState).toEqual({ checked: false, reason: "dry_run", items: [], repairPending: false });
+  });
+});
+
+describe("수동 복구 (POST /api/admin/dns-ops/recover)", () => {
+  let cf: FakeCloudflare;
+  let admin: Session;
+
+  beforeEach(async () => {
+    cf = fakeCloudflare(vi.spyOn(globalThis, "fetch"));
+    admin = await login(ADMIN_EMAIL);
+    await env.DB.batch([env.DB.prepare(`DELETE FROM job_locks`), env.DB.prepare(`DELETE FROM dns_ops`)]);
+  });
+
+  const recover = () => call("/api/admin/dns-ops/recover", { method: "POST", session: admin, via });
+
+  async function missingRecordLease() {
+    const name = nm();
+    // 헬스체크 대상이 되지 않게 방금 검사한 것으로 둔다(cron 테스트에서 외부 요청 방지).
+    return createLease({
+      name,
+      owner: `rm-${uid()}@ajou.ac.kr`,
+      lastHealthCheckAt: Date.now(),
+      records: [{ type: "A", host: fq(name), content: "3.3.3.3", cfRecordId: `cf-${uid()}` }],
+    });
+  }
+
+  it("시도 상한을 넘은 작업과 복구 예약을 바로 처리하고 감사 로그를 남긴다", async () => {
+    const exhausted = await missingRecordLease();
+    await env.DB.prepare(`INSERT INTO dns_ops (id, lease_id, kind, started_at, attempts) VALUES (?, ?, 'replace', 0, ?)`)
+      .bind(uid(), exhausted, OP_MAX_ATTEMPTS)
+      .run();
+    const queued = await missingRecordLease();
+    await queueRepair(env.DB, queued);
+
+    const res = await recover();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ recovered: 2, failed: 0, changedLeases: 2 });
+    expect(await ops(exhausted)).toEqual([]);
+    expect(await ops(queued)).toEqual([]);
+    expect([...cf.records.values()].map((r) => r.comment)).toEqual(expect.arrayContaining([`bcd:lease=${exhausted}`, `bcd:lease=${queued}`]));
+    expect(await auditFor({ action: "admin.dns_recover" })).toContainEqual(
+      expect.objectContaining({ actor_email: ADMIN_EMAIL, detail: { recovered: 2, failed: 0, changedLeases: 2 } }),
+    );
+  });
+
+  it("시작한 지 10분이 안 된 작업은 진행 중일 수 있어 건너뛴다", async () => {
+    const leaseId = await missingRecordLease();
+    await env.DB.prepare(`INSERT INTO dns_ops (id, lease_id, kind, started_at) VALUES (?, ?, 'replace', ?)`).bind(uid(), leaseId, Date.now()).run();
+    expect(await (await recover()).json()).toMatchObject({ recovered: 0 });
+    expect(await ops(leaseId)).toHaveLength(1);
+  });
+
+  it("마지막 실행 뒤 3분 동안은 다시 실행할 수 없다 (429, Retry-After)", async () => {
+    expect((await recover()).status).toBe(200);
+    const again = await recover();
+    expect(again.status).toBe(429);
+    expect(Number(again.headers.get("Retry-After"))).toBeGreaterThan(170);
+    expect(await again.json()).toMatchObject({ error: { code: "recover_too_soon" }, retryAfterSec: expect.any(Number) });
+
+    const drift = (await (await call("/api/admin/drift", { session: admin })).json()) as DriftResponse;
+    expect(drift.recoverLock).toMatchObject({ trigger: "manual", availableAt: expect.any(Number) });
+
+    // 3분이 지나면 다시 가능
+    await env.DB.prepare(`UPDATE job_locks SET started_at = started_at - ?`).bind(RECOVER_LOCK_MS).run();
+    expect((await recover()).status).toBe(200);
+  });
+
+  it("cron 실행 직후에는 수동 복구를 막고, 수동 복구 직후의 cron은 작업 기록 복구를 건너뛴다", async () => {
+    // 헬스체크 대상이 없게 해 외부 요청 없이 작업 기록 복구 단계만 확인한다(24시간 안에 검사한 lease는 건너뜀).
+    await env.DB.prepare(`UPDATE leases SET last_health_check_at = ?`).bind(Date.now()).run();
+    await runCron(CRON_HEALTH);
+    const blocked = await recover();
+    expect(blocked.status).toBe(429);
+    expect(((await blocked.json()) as { error: { message: string } }).error.message).toContain("정기 복구");
+
+    await env.DB.prepare(`DELETE FROM job_locks`).run();
+    expect((await recover()).status).toBe(200);
+    const leaseId = await missingRecordLease();
+    await env.DB.prepare(`INSERT INTO dns_ops (id, lease_id, kind, started_at) VALUES (?, ?, 'repair', 0)`).bind(uid(), leaseId).run();
+    await runCron(CRON_HEALTH);
+    expect(await ops(leaseId)).toHaveLength(1);
+  });
+
+  it("관리자만 실행할 수 있다", async () => {
+    const user = await login(`ru-${uid()}@ajou.ac.kr`);
+    expect((await call("/api/admin/dns-ops/recover", { method: "POST", session: user })).status).toBe(403);
   });
 });
