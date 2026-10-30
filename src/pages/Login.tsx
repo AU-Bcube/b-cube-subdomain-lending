@@ -4,12 +4,12 @@ import { useSession } from "../session";
 
 const ERROR_MESSAGES: Record<string, string> = {
   domain_not_allowed: "@ajou.ac.kr 계정만 이용할 수 있습니다.",
-  email_unverified: "이메일 인증이 완료되지 않은 Google 계정입니다.",
-  hd_mismatch: "아주대학교 Google Workspace 계정으로 로그인해 주세요.",
+  email_unverified: "이메일 인증이 완료되지 않은 계정입니다.",
   banned: "이용이 제한된 계정입니다. 운영진에게 문의하세요.",
   oauth_state: "로그인 요청이 만료되었거나 올바르지 않습니다. 다시 시도해 주세요.",
-  oauth_cancelled: "Google 로그인이 취소되었습니다.",
-  oauth_failed: "Google 로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.",
+  oauth_cancelled: "로그인이 취소되었습니다.",
+  oauth_client_suspended: "로그인을 사용할 수 없습니다. 운영진에게 문의하세요.",
+  oauth_failed: "로그인에 실패했습니다. 잠시 후 다시 시도해 주세요.",
   oauth_not_configured: "OAuth 미설정 — 개발용 로그인을 사용하세요.",
 };
 
@@ -42,7 +42,7 @@ export function LoginPage() {
                     lowContrast
                   />
                 )}
-                <Button href="/auth/login">Google로 로그인</Button>
+                <Button href="/auth/login">B-CUBE 계정으로 로그인</Button>
               </Stack>
             </Tile>
 

@@ -65,17 +65,24 @@ export const authRoutes = new Hono<HonoEnv>()
     const flow = decodeOAuthCookie(getCookie(c, oauthCookieName(config)));
     deleteCookie(c, oauthCookieName(config), { path: "/", secure: !config.isDev });
 
-    const googleError = c.req.query("error");
-    if (googleError) {
-      // 사용자가 계정 선택을 취소한 경우 등
-      console.warn("[oauth] Google 오류 응답:", googleError.slice(0, 64));
-      return loginError(c, googleError === "access_denied" ? "oauth_cancelled" : "oauth_failed");
+    const idpError = c.req.query("error");
+    if (idpError) {
+      console.warn("[oauth] IdP 오류 응답:", idpError.slice(0, 64));
+      // access_denied: 동의 거부 또는 Google 로그인 취소, unauthorized_client: 동의 중에 관리자가 SP를 중지함
+      if (idpError === "access_denied") return loginError(c, "oauth_cancelled");
+      if (idpError === "unauthorized_client") return loginError(c, "oauth_client_suspended");
+      return loginError(c, "oauth_failed");
     }
 
     const state = c.req.query("state");
     const code = c.req.query("code");
     if (!flow || !state || !timingSafeEqual(state, flow.state)) return loginError(c, "oauth_state");
     if (!code) return loginError(c, "oauth_failed");
+    // RFC 9207: 다른 issuer의 응답을 이 흐름에 끼워 넣지 못하게 한다.
+    if (c.req.query("iss") !== config.idpIssuer) {
+      console.error("[oauth] 인가 응답 iss 불일치");
+      return loginError(c, "oauth_failed");
+    }
 
     try {
       const idToken = await exchangeCode(config, code, flow.verifier);

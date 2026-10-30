@@ -7,9 +7,9 @@ DEV_FAKE_LOGIN=true
 DEV_AUTH_DEBUG=false
 DNS_DRY_RUN=true
 
-# 실제 Google 로그인을 시험할 때만 채운다.
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
+# 실제 B-CUBE IdP 로그인을 시험할 때만 채운다. redirect_uri는 APP_ORIGIN/auth/callback이다.
+IDP_CLIENT_ID=
+IDP_CLIENT_SECRET=
 
 # DNS_DRY_RUN=false로 실제 Cloudflare API를 호출할 때만 채운다.
 CF_ZONE_ID=

@@ -1,14 +1,11 @@
 /**
- * Google OAuth (Authorization Code + PKCE) 클라이언트 (SPEC §6.1).
+ * B-CUBE IdP(OpenID Connect, Authorization Code + PKCE) 클라이언트 (SPEC §6.1).
  */
 import { createRemoteJWKSet, errors as joseErrors, jwtVerify } from "jose";
 import type { Config } from "../env";
 import type { LoginIdentity } from "./login";
 
-export const GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth";
-export const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
-export const GOOGLE_JWKS_URL = "https://www.googleapis.com/oauth2/v3/certs";
-export const GOOGLE_ISSUERS = ["https://accounts.google.com", "accounts.google.com"];
+export const IDP_SCOPES = "openid email profile";
 
 export type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -22,21 +19,24 @@ export function redirectUri(config: Config): string {
 }
 
 export function buildAuthUrl(config: Config, params: { state: string; nonce: string; codeChallenge: string }): string {
-  const url = new URL(GOOGLE_AUTH_URL);
+  const url = new URL(`${config.idpIssuer}/authorize`);
   url.search = new URLSearchParams({
     response_type: "code",
-    client_id: config.googleClientId,
+    client_id: config.idpClientId,
     redirect_uri: redirectUri(config),
-    scope: "openid email profile",
+    scope: IDP_SCOPES,
     state: params.state,
     nonce: params.nonce,
     code_challenge: params.codeChallenge,
     code_challenge_method: "S256",
-    // UI 힌트일 뿐 검증이 아니다. 실제 검증은 evaluateLogin이 한다.
-    hd: config.allowedEmailDomain,
-    prompt: "select_account",
   }).toString();
   return url.toString();
+}
+
+/** client_secret_basic. RFC 6749 §2.3.1에 따라 각 값을 form-urlencode한 뒤 묶는다. */
+function basicAuth(config: Config): string {
+  const encode = (value: string) => new URLSearchParams({ v: value }).toString().slice(2);
+  return `Basic ${btoa(`${encode(config.idpClientId)}:${encode(config.idpClientSecret)}`)}`;
 }
 
 /** 인가 코드를 토큰으로 교환하고 id_token을 돌려준다. */
@@ -48,14 +48,16 @@ export async function exchangeCode(
 ): Promise<string> {
   let res: Response;
   try {
-    res = await fetcher(GOOGLE_TOKEN_URL, {
+    res = await fetcher(`${config.idpIssuer}/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "application/json" },
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+        Authorization: basicAuth(config),
+      },
       body: new URLSearchParams({
         grant_type: "authorization_code",
         code,
-        client_id: config.googleClientId,
-        client_secret: config.googleClientSecret,
         redirect_uri: redirectUri(config),
         code_verifier: codeVerifier,
       }).toString(),
@@ -73,28 +75,27 @@ export async function exchangeCode(
 
 let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
-function googleJwks() {
+function idpJwks(config: Config) {
   // 키 집합은 isolate 단위로 캐시한다(jose가 kid 미스 시 재조회).
-  jwks ??= createRemoteJWKSet(new URL(GOOGLE_JWKS_URL));
+  jwks ??= createRemoteJWKSet(new URL(`${config.idpIssuer}/jwks.json`));
   return jwks;
 }
 
-export interface GoogleClaims {
+export interface IdpClaims {
   sub: string;
   email: string;
   email_verified: boolean;
-  hd?: string;
   name?: string;
 }
 
 /** id_token 서명(JWKS)과 iss, aud, exp, nonce를 검증한다. */
-export async function verifyIdToken(config: Config, idToken: string, expectedNonce: string): Promise<GoogleClaims> {
+export async function verifyIdToken(config: Config, idToken: string, expectedNonce: string): Promise<IdpClaims> {
   let payload;
   try {
-    ({ payload } = await jwtVerify(idToken, googleJwks(), {
-      issuer: GOOGLE_ISSUERS,
-      audience: config.googleClientId,
-      algorithms: ["RS256"],
+    ({ payload } = await jwtVerify(idToken, idpJwks(config), {
+      issuer: config.idpIssuer,
+      audience: config.idpClientId,
+      algorithms: ["ES256"],
     }));
   } catch (err) {
     const code = err instanceof joseErrors.JOSEError ? err.code : String(err);
@@ -109,19 +110,17 @@ export async function verifyIdToken(config: Config, idToken: string, expectedNon
   return {
     sub: payload.sub,
     email: payload.email,
-    // Google은 boolean으로 주지만, 그 외 값은 모두 미인증으로 취급한다.
+    // boolean true가 아닌 값은 모두 미인증으로 취급한다.
     email_verified: payload.email_verified === true,
-    ...(typeof payload.hd === "string" ? { hd: payload.hd } : {}),
     ...(typeof payload.name === "string" ? { name: payload.name } : {}),
   };
 }
 
-export function toIdentity(claims: GoogleClaims): LoginIdentity {
+export function toIdentity(claims: IdpClaims): LoginIdentity {
   return {
     sub: claims.sub,
     email: claims.email,
     emailVerified: claims.email_verified,
-    hd: claims.hd,
     name: claims.name,
   };
 }

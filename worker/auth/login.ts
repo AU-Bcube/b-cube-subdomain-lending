@@ -9,11 +9,10 @@ export interface LoginIdentity {
   sub: string;
   email: string;
   emailVerified: boolean;
-  hd?: string | undefined;
   name?: string | undefined;
 }
 
-export type LoginDenyReason = "email_unverified" | "domain_not_allowed" | "hd_mismatch" | "banned";
+export type LoginDenyReason = "email_unverified" | "domain_not_allowed" | "banned";
 
 export type LoginDecision = { ok: true } | { ok: false; reason: LoginDenyReason };
 
@@ -25,11 +24,7 @@ export function evaluateLogin(
 ): LoginDecision {
   const email = identity.email.trim().toLowerCase();
   if (identity.emailVerified !== true) return { ok: false, reason: "email_unverified" };
-  const isAdmin = config.adminEmails.has(email);
-  if (!isAdmin) {
-    if (!email.endsWith(`@${config.allowedEmailDomain}`)) return { ok: false, reason: "domain_not_allowed" };
-    if (config.requireHd && identity.hd !== config.allowedEmailDomain) return { ok: false, reason: "hd_mismatch" };
-  }
+  if (!email.endsWith(`@${config.allowedEmailDomain}`)) return { ok: false, reason: "domain_not_allowed" };
   if (existing?.banned_at != null) return { ok: false, reason: "banned" };
   return { ok: true };
 }
@@ -58,7 +53,7 @@ export async function completeLogin(
       actorEmail: email,
       actorRole: "user",
       targetEmail: email,
-      detail: { reason: decision.reason, hd: identity.hd ?? null, ...devDetail },
+      detail: { reason: decision.reason, ...devDetail },
       ...requestMeta(c),
     });
     return c.redirect(`/login?error=${decision.reason}`, 302);
