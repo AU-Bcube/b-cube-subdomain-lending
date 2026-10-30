@@ -94,7 +94,7 @@
     "ZONE_NAME": "b-cube.kr",
     "CF_ZONE_ID": "<사용자 제공>",
     "IDP_ISSUER": "https://id.b-cube.kr",
-    "IDP_CLIENT_ID": "domain-console",
+    "IDP_CLIENT_ID": "dyn-f6c226535e6a490f8ff1",
     "ALLOWED_EMAIL_DOMAIN": "ajou.ac.kr",
     "REQUIRED_SOHAKOE": "B-cube",
     "ADMIN_EMAILS": "",

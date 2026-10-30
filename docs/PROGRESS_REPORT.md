@@ -239,7 +239,7 @@
 
 ## 5. 다음 작업
 
-0. B-CUBE IdP 전환 마무리 (2026-10-30, 코드와 테스트 완료, #15 리뷰·배포 전): 등록 토큰으로 동적 등록(RFC 7591, 2026-10-30 결정. 정적 `domain-console` 대신 발급된 `client_id`를 `IDP_CLIENT_ID`에 반영), 관리자 승인(`b_cube_status: pending`), `/auth/debug`로 실제 소학회 이름 확인, `IDP_CLIENT_SECRET` 입력, 원격 마이그레이션 직후 배포, 기존 Google 클라이언트 삭제 (사용자)
+0. B-CUBE IdP 전환 마무리 (2026-10-30, 코드와 테스트 완료, #15 리뷰·배포 전): 동적 등록 완료(RFC 7591, `client_id` `dyn-f6c226535e6a490f8ff1`을 `IDP_CLIENT_ID`에 반영, 2026-10-30). 남은 일은 등록 토큰 폐기(작업 중 `wrangler.jsonc`에 들어갔다가 제거, 커밋되지 않음), 관리자 승인(`b_cube_status: pending`), `IDP_CLIENT_SECRET` 입력, `/auth/debug`로 실제 소학회 이름 확인, 원격 마이그레이션 직후 배포, 기존 Google 클라이언트 삭제 (사용자)
 1. 로컬 D1 재시드: `npm run db:reset` (시드에 `suspended_at` 추가. 0002 마이그레이션은 로컬에 적용 완료. 0005 적용도 이 명령으로 된다)
 2. 화면 확인 (사용자): 1.15(`dev`, `preview`), 5.12(375px), 5.13(페르소나별), 6.13(관리 탭 4개)
 3. 실제 IdP로 로그인하고 `/auth/debug`에서 소학회 이름 확인 → `REQUIRED_SOHAKOE` 확정 (사용자)

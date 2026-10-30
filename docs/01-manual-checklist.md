@@ -45,10 +45,10 @@
 
 > 이 서비스는 Google OAuth 클라이언트를 직접 쓰지 않습니다. 로그인은 B-CUBE IdP(`https://id.b-cube.kr`)가 처리합니다. 기존 Google 클라이언트(`bcube-domain` 프로젝트)는 전환 후 삭제합니다.
 
-- [ ] IdP 저장소에서 `domain-console` 클라이언트의 `scopes`에 `sohakoe`를 추가합니다. `student`는 이미 있습니다. 빠지면 로그인이 `invalid_scope`로 실패합니다.
-- [ ] 로컬에서 실제 IdP 로그인을 시험하려면 같은 클라이언트의 `redirect_uris`에 `http://localhost:5173/auth/callback`을 추가합니다.
-- [ ] IdP에서 `pnpm client:secret`으로 `client_secret`을 만들고 해시를 반영해 배포합니다.
-- [ ] 받은 값을 `IDP_CLIENT_SECRET`으로 입력합니다(6번). `IDP_CLIENT_ID`는 `wrangler.jsonc`의 `domain-console`입니다.
+- [x] 등록 토큰으로 클라이언트를 동적 등록합니다(RFC 7591, 2026-10-30 완료). `client_id`는 `dyn-f6c226535e6a490f8ff1`이고, `redirect_uris`는 운영과 `http://localhost:5173/auth/callback`, scope는 `openid email profile student sohakoe`입니다.
+- [ ] IdP 관리자가 클라이언트를 승인할 때까지 기다립니다(`b_cube_status: pending`). 승인 전에는 로그인할 수 없습니다.
+- [ ] 등록 응답의 `client_secret`을 `IDP_CLIENT_SECRET`으로 입력합니다(6번). `IDP_CLIENT_ID`는 `wrangler.jsonc`에 반영했습니다.
+- [ ] 등록 응답의 `client_secret`과 `registration_access_token`은 다시 받을 수 없으므로 비밀번호 관리자에 옮기고, 응답 파일을 지웁니다. 등록 토큰(`iat_...`)은 `wrangler.jsonc` 같은 설정 파일에 넣지 않습니다.
 
 ## 5. 로컬 개발 환경
 
