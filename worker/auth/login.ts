@@ -4,15 +4,26 @@ import type { HonoEnv } from "../types";
 import { requestMeta, writeAudit } from "../services/audit";
 import { createSession } from "./session";
 
+/** IdP `sohakoe_memberships` 클레임의 항목 */
+export interface SohakoeMembership {
+  name: string;
+  year?: string;
+  semester?: string;
+  from?: string;
+  to?: string;
+}
+
 /** ID 토큰(또는 개발용 페르소나)에서 얻은 로그인 주체 */
 export interface LoginIdentity {
   sub: string;
   email: string;
   emailVerified: boolean;
   name?: string | undefined;
+  studentId?: string | undefined;
+  sohakoeMemberships: SohakoeMembership[];
 }
 
-export type LoginDenyReason = "email_unverified" | "domain_not_allowed" | "banned";
+export type LoginDenyReason = "email_unverified" | "domain_not_allowed" | "sohakoe_required" | "banned";
 
 export type LoginDecision = { ok: true } | { ok: false; reason: LoginDenyReason };
 
@@ -25,6 +36,8 @@ export function evaluateLogin(
   const email = identity.email.trim().toLowerCase();
   if (identity.emailVerified !== true) return { ok: false, reason: "email_unverified" };
   if (!email.endsWith(`@${config.allowedEmailDomain}`)) return { ok: false, reason: "domain_not_allowed" };
+  const isMember = identity.sohakoeMemberships.some((m) => m.name.trim().toLowerCase() === config.requiredSohakoe);
+  if (!isMember && !config.adminEmails.has(email)) return { ok: false, reason: "sohakoe_required" };
   if (existing?.banned_at != null) return { ok: false, reason: "banned" };
   return { ok: true };
 }
@@ -62,14 +75,24 @@ export async function completeLogin(
   const now = Date.now();
   await db
     .prepare(
-      `INSERT INTO users (email, idp_sub, name, first_login_at, last_login_at)
-       VALUES (?, ?, ?, ?, ?)
+      `INSERT INTO users (email, idp_sub, name, student_id, sohakoe_memberships, first_login_at, last_login_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(email) DO UPDATE SET
          idp_sub = excluded.idp_sub,
          name = COALESCE(excluded.name, users.name),
+         student_id = COALESCE(excluded.student_id, users.student_id),
+         sohakoe_memberships = excluded.sohakoe_memberships,
          last_login_at = excluded.last_login_at`,
     )
-    .bind(email, identity.sub, identity.name ?? null, now, now)
+    .bind(
+      email,
+      identity.sub,
+      identity.name ?? null,
+      identity.studentId ?? null,
+      JSON.stringify(identity.sohakoeMemberships),
+      now,
+      now,
+    )
     .run();
 
   await createSession(c, email);

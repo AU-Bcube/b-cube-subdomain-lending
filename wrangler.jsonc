@@ -29,6 +29,7 @@
     "IDP_ISSUER": "https://id.b-cube.kr",
     "IDP_CLIENT_ID": "domain-console",
     "ALLOWED_EMAIL_DOMAIN": "ajou.ac.kr",
+    "REQUIRED_SOHAKOE": "B-cube",
     "MAX_LEASES_PER_USER": "3",
     "LEASE_DAYS": "180",
     "RENEW_WINDOW_DAYS": "30",

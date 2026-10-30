@@ -17,6 +17,7 @@ export default defineConfig({
           IDP_ISSUER: "https://idp.test",
           IDP_CLIENT_ID: "test-client-id",
           IDP_CLIENT_SECRET: "test-client-secret",
+          REQUIRED_SOHAKOE: "B-cube",
           CF_ZONE_ID: "",
           CF_API_TOKEN: "",
           ADMIN_EMAILS: "t-admin@ajou.ac.kr",

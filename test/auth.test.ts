@@ -45,6 +45,8 @@ function idpClaims(email: string, extra: JWTPayload = {}): (nonce: string) => JW
     email_verified: true,
     name: "테스트",
     nonce,
+    student: { id: "202600123", name: "홍길동", department: "소프트웨어학과" },
+    sohakoe_memberships: [{ name: "B-Cube", year: "2026", semester: "10" }],
     ...extra,
   });
 }
@@ -139,7 +141,7 @@ describe("GET /auth/login", () => {
     expect(p.get("response_type")).toBe("code");
     expect(p.get("client_id")).toBe(CLIENT_ID);
     expect(p.get("redirect_uri")).toBe(`${ORIGIN}/auth/callback`);
-    expect(p.get("scope")).toBe("openid email profile");
+    expect(p.get("scope")).toBe("openid email profile student sohakoe");
     expect(p.has("hd")).toBe(false);
     expect(p.has("prompt")).toBe(false);
     expect(p.get("code_challenge_method")).toBe("S256");
@@ -192,8 +194,13 @@ describe("GET /auth/callback — 허용", () => {
     expect(me.status).toBe(200);
     expect(await me.json()).toMatchObject({ email, isAdmin: false });
 
-    const user = await env.DB.prepare(`SELECT idp_sub, name FROM users WHERE email = ?`).bind(email).first();
-    expect(user).toEqual({ idp_sub: `google-${email}`, name: "테스트" });
+    const user = await env.DB.prepare(`SELECT idp_sub, name, student_id, sohakoe_memberships FROM users WHERE email = ?`).bind(email).first();
+    expect(user).toEqual({
+      idp_sub: `google-${email}`,
+      name: "테스트",
+      student_id: "202600123",
+      sohakoe_memberships: JSON.stringify([{ name: "B-Cube", year: "2026", semester: "10" }]),
+    });
     const logs = await auditFor({ action: "auth.login", targetEmail: email });
     expect(logs).toHaveLength(1);
     expect(logs[0]?.detail).toBeNull(); // 실제 로그인은 dev 표시 없음
@@ -207,6 +214,26 @@ describe("GET /auth/callback — 허용", () => {
     expect(row).toBeTruthy();
   });
 
+  it("소학회 이름은 대소문자를 구분하지 않고, 기간은 보지 않는다", async () => {
+    const sohakoe_memberships = [{ name: " B-CUBE ", year: "2019", semester: "20" }];
+    const { callback } = await oauthLogin(idpClaims(`case-${uid()}@ajou.ac.kr`, { sohakoe_memberships }));
+    expect(location(callback)).toBe("/");
+  });
+
+  it("REQUIRED_SOHAKOE 설정을 바꿀 수 있다", async () => {
+    const fetcher = workerWith({ REQUIRED_SOHAKOE: "다른학회" });
+    const claims = idpClaims(`cfg-${uid()}@ajou.ac.kr`, { sohakoe_memberships: [{ name: "다른학회" }] });
+    expect(location((await oauthLogin(claims, { fetcher })).callback)).toBe("/");
+  });
+
+  it("ADMIN_EMAILS는 소학회 검사를 면제한다", async () => {
+    const email = `boss-${uid()}@ajou.ac.kr`;
+    const fetcher = workerWith({ ADMIN_EMAILS: email });
+    const { callback } = await oauthLogin(idpClaims(email, { sohakoe_memberships: [] }), { fetcher });
+    expect(location(callback)).toBe("/");
+    const logs = await auditFor({ action: "auth.login", targetEmail: email });
+    expect(logs.at(-1)?.actor_role).toBe("admin");
+  });
 });
 
 describe("GET /auth/callback — 거부", () => {
@@ -249,6 +276,18 @@ describe("GET /auth/callback — 거부", () => {
   it("관리자도 허용 도메인이어야 한다", async () => {
     const fetcher = workerWith({ ADMIN_EMAILS: "boss3@gmail.com" });
     await expectDenied(idpClaims("boss3@gmail.com"), "domain_not_allowed", fetcher);
+  });
+
+  it("소학회 이력 없음, 다른 소학회, 클레임 없음", async () => {
+    for (const sohakoe_memberships of [[], [{ name: "B-Cube2" }], undefined]) {
+      await expectDenied(idpClaims(`nosh-${uid()}@ajou.ac.kr`, { sohakoe_memberships }), "sohakoe_required");
+    }
+  });
+
+  it("거부된 사용자는 저장하지 않는다", async () => {
+    const email = `nosave-${uid()}@ajou.ac.kr`;
+    await expectDenied(idpClaims(email, { sohakoe_memberships: [] }), "sohakoe_required");
+    expect(await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(email).first()).toBeNull();
   });
 
   it("차단된 사용자", async () => {
@@ -341,12 +380,14 @@ describe("evaluateLogin (허용 규칙 순수 함수)", () => {
     sub: "s",
     email,
     emailVerified: true,
+    sohakoeMemberships: [{ name: "B-Cube" }],
     ...extra,
   });
 
-  it("규칙 순서: 미인증 → 도메인 → 차단", () => {
+  it("규칙 순서: 미인증 → 도메인 → 소학회 → 차단", () => {
     expect(evaluateLogin(base, id("a@gmail.com", { emailVerified: false }), null)).toEqual({ ok: false, reason: "email_unverified" });
     expect(evaluateLogin(base, id("a@gmail.com"), null)).toEqual({ ok: false, reason: "domain_not_allowed" });
+    expect(evaluateLogin(base, id("a@ajou.ac.kr", { sohakoeMemberships: [] }), { banned_at: 1 })).toEqual({ ok: false, reason: "sohakoe_required" });
     expect(evaluateLogin(base, id("a@ajou.ac.kr"), { banned_at: 1 })).toEqual({ ok: false, reason: "banned" });
     expect(evaluateLogin(base, id("a@ajou.ac.kr"), null)).toEqual({ ok: true });
   });
@@ -461,7 +502,7 @@ describe("개발 기능 차단", () => {
     expect(logs.at(-1)?.detail).toEqual({ dev: true });
   });
 
-  it("/auth/debug (DEV_AUTH_DEBUG=true): 마지막 로그인의 email, email_verified 표시", async () => {
+  it("/auth/debug (DEV_AUTH_DEBUG=true): 마지막 로그인의 email, email_verified, 소학회 표시", async () => {
     const fetcher = workerWith({ DEV_AUTH_DEBUG: "true" });
     const email = `dbg-${uid()}@ajou.ac.kr`;
     await oauthLogin(idpClaims(email), { fetcher });
@@ -470,5 +511,6 @@ describe("개발 기능 차단", () => {
     const html = await res.text();
     expect(html).toContain(email);
     expect(html).toContain("<code>true</code>");
+    expect(html).toContain("<code>B-Cube</code>");
   });
 });

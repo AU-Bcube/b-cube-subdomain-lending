@@ -19,6 +19,8 @@ export interface Config {
   /** IdP 클라이언트가 설정되어 있는지. 개발 모드 + DEV_FAKE_LOGIN이면 false일 수 있다. */
   oauthConfigured: boolean;
   allowedEmailDomain: string;
+  /** 로그인에 필요한 소학회 이름(소문자 정규화). ADMIN_EMAILS는 면제한다. */
+  requiredSohakoe: string;
   adminEmails: ReadonlySet<string>;
   maxLeasesPerUser: number;
   leaseDays: number;
@@ -125,6 +127,8 @@ export function parseConfig(env: AppEnv): Config {
   if (!zoneName) errors.push("ZONE_NAME이 필요합니다");
   const allowedEmailDomain = str(raw.ALLOWED_EMAIL_DOMAIN).toLowerCase();
   if (!allowedEmailDomain) errors.push("ALLOWED_EMAIL_DOMAIN이 필요합니다");
+  const requiredSohakoe = str(raw.REQUIRED_SOHAKOE).toLowerCase();
+  if (!requiredSohakoe) errors.push("REQUIRED_SOHAKOE가 필요합니다");
 
   const adminEmails = new Set(splitList(raw.ADMIN_EMAILS));
   // 개발 모드의 admin 페르소나 자동 포함은 여기서만 처리한다. 권한 검사 코드에는 개발용 분기가 없다.
@@ -141,6 +145,7 @@ export function parseConfig(env: AppEnv): Config {
     idpClientSecret,
     oauthConfigured,
     allowedEmailDomain,
+    requiredSohakoe,
     adminEmails,
     maxLeasesPerUser: int("MAX_LEASES_PER_USER", raw.MAX_LEASES_PER_USER, errors),
     leaseDays: int("LEASE_DAYS", raw.LEASE_DAYS, errors),

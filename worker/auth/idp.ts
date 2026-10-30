@@ -3,9 +3,9 @@
  */
 import { createRemoteJWKSet, errors as joseErrors, jwtVerify } from "jose";
 import type { Config } from "../env";
-import type { LoginIdentity } from "./login";
+import type { LoginIdentity, SohakoeMembership } from "./login";
 
-export const IDP_SCOPES = "openid email profile";
+export const IDP_SCOPES = "openid email profile student sohakoe";
 
 export type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -86,6 +86,24 @@ export interface IdpClaims {
   email: string;
   email_verified: boolean;
   name?: string;
+  studentId?: string;
+  sohakoeMemberships: SohakoeMembership[];
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === "string" && value !== "" ? value : undefined;
+}
+
+/** 저장할 필드만 고른다. 형식이 맞지 않는 값은 없는 것으로 취급한다. */
+function parseMemberships(value: unknown): SohakoeMembership[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item: unknown) => {
+    const row = (typeof item === "object" && item !== null ? item : {}) as Record<string, unknown>;
+    const name = text(row.name);
+    if (!name) return [];
+    const optional = ["year", "semester", "from", "to"] as const;
+    return [{ name, ...Object.fromEntries(optional.flatMap((k) => (text(row[k]) ? [[k, text(row[k])]] : []))) }];
+  });
 }
 
 /** id_token 서명(JWKS)과 iss, aud, exp, nonce를 검증한다. */
@@ -107,12 +125,16 @@ export async function verifyIdToken(config: Config, idToken: string, expectedNon
   if (typeof payload.sub !== "string" || typeof payload.email !== "string") {
     throw new OAuthError("id_token에 sub 또는 email이 없음");
   }
+  const student = payload.student as { id?: unknown } | undefined;
+  const studentId = text(student?.id);
   return {
     sub: payload.sub,
     email: payload.email,
     // boolean true가 아닌 값은 모두 미인증으로 취급한다.
     email_verified: payload.email_verified === true,
     ...(typeof payload.name === "string" ? { name: payload.name } : {}),
+    ...(studentId ? { studentId } : {}),
+    sohakoeMemberships: parseMemberships(payload.sohakoe_memberships),
   };
 }
 
@@ -122,5 +144,7 @@ export function toIdentity(claims: IdpClaims): LoginIdentity {
     email: claims.email,
     emailVerified: claims.email_verified,
     name: claims.name,
+    studentId: claims.studentId,
+    sohakoeMemberships: claims.sohakoeMemberships,
   };
 }

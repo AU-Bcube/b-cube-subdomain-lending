@@ -8,12 +8,18 @@ export interface DebugClaims {
   at: number;
   email: string;
   email_verified: boolean;
+  sohakoe: string[];
 }
 
 let last: DebugClaims | null = null;
 
 export function recordDebugClaims(claims: IdpClaims): void {
-  last = { at: Date.now(), email: claims.email, email_verified: claims.email_verified };
+  last = {
+    at: Date.now(),
+    email: claims.email,
+    email_verified: claims.email_verified,
+    sohakoe: claims.sohakoeMemberships.map((m) => m.name),
+  };
 }
 
 export function lastDebugClaims(): DebugClaims | null {
