@@ -62,7 +62,7 @@ const firstLogin: Record<string, number> = {
 };
 const users = DEV_PERSONAS.map((p) => ({
   email: p.email,
-  google_sub: p.sub,
+  idp_sub: p.sub,
   name: p.name,
   first_login_at: firstLogin[p.email] ?? ago(30),
   last_login_at: p.as === "banned" ? ago(21) : ago(0, 3),
@@ -354,9 +354,9 @@ sql.push(
 
 for (const u of users) {
   sql.push(
-    `INSERT INTO users (email, google_sub, name, first_login_at, last_login_at, banned_at, ban_reason) VALUES (${[
+    `INSERT INTO users (email, idp_sub, name, first_login_at, last_login_at, banned_at, ban_reason) VALUES (${[
       u.email,
-      u.google_sub,
+      u.idp_sub,
       u.name,
       u.first_login_at,
       u.last_login_at,

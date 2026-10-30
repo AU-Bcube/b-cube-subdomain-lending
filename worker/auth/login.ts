@@ -67,10 +67,10 @@ export async function completeLogin(
   const now = Date.now();
   await db
     .prepare(
-      `INSERT INTO users (email, google_sub, name, first_login_at, last_login_at)
+      `INSERT INTO users (email, idp_sub, name, first_login_at, last_login_at)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(email) DO UPDATE SET
-         google_sub = excluded.google_sub,
+         idp_sub = excluded.idp_sub,
          name = COALESCE(excluded.name, users.name),
          last_login_at = excluded.last_login_at`,
     )

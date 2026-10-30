@@ -184,8 +184,8 @@ describe("GET /auth/callback — 허용", () => {
     expect(me.status).toBe(200);
     expect(await me.json()).toMatchObject({ email, isAdmin: false });
 
-    const user = await env.DB.prepare(`SELECT google_sub, name FROM users WHERE email = ?`).bind(email).first();
-    expect(user).toEqual({ google_sub: `google-${email}`, name: "테스트" });
+    const user = await env.DB.prepare(`SELECT idp_sub, name FROM users WHERE email = ?`).bind(email).first();
+    expect(user).toEqual({ idp_sub: `google-${email}`, name: "테스트" });
     const logs = await auditFor({ action: "auth.login", targetEmail: email });
     expect(logs).toHaveLength(1);
     expect(logs[0]?.detail).toBeNull(); // 실제 로그인은 dev 표시 없음

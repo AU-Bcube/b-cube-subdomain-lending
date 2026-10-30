@@ -18,7 +18,7 @@ export function uid(): string {
 export async function createUser(email: string, opts: { banned?: boolean; name?: string } = {}): Promise<void> {
   const now = Date.now();
   await env.DB.prepare(
-    `INSERT INTO users (email, google_sub, name, first_login_at, last_login_at, banned_at, ban_reason)
+    `INSERT INTO users (email, idp_sub, name, first_login_at, last_login_at, banned_at, ban_reason)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(email, `sub-${email}`, opts.name ?? null, now, now, opts.banned ? now : null, opts.banned ? "테스트 차단" : null)
