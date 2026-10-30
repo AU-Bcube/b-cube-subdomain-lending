@@ -2,7 +2,7 @@ import { Hono, type Context } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { randomToken, sha256Base64url, timingSafeEqual } from "../auth/crypto";
 import { recordDebugClaims } from "../auth/debug";
-import { buildAuthUrl, exchangeCode, OAuthError, toIdentity, verifyIdToken } from "../auth/google";
+import { buildAuthUrl, exchangeCode, OAuthError, toIdentity, verifyIdToken } from "../auth/idp";
 import { completeLogin } from "../auth/login";
 import { destroySession } from "../auth/session";
 import type { Config } from "../env";

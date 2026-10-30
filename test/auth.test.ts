@@ -2,7 +2,7 @@ import { env, SELF } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT, type JWTPayload } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Base64url } from "../worker/auth/crypto";
-import { GOOGLE_JWKS_URL, GOOGLE_TOKEN_URL } from "../worker/auth/google";
+import { GOOGLE_JWKS_URL, GOOGLE_TOKEN_URL } from "../worker/auth/idp";
 import { evaluateLogin } from "../worker/auth/login";
 import { parseConfig } from "../worker/env";
 import { auditFor, call, createUser, login, ORIGIN, uid, workerWith } from "./helpers";
