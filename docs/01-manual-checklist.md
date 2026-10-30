@@ -2,7 +2,7 @@
 
 > 브라우저(일부 터미널)로 **직접** 해야 하는 작업만 모았습니다. 코드 작업은 `SPEC.md`를 Claude Code에 넘기세요.
 > 진행 순서: **1, 2, 5**만 마치면 Claude Code 작업(M1)을 시작할 수 있습니다. 로컬 개발은 개발용 가짜 로그인과 `DNS_DRY_RUN`으로 진행하므로 OAuth와 API 토큰이 필요 없습니다.
-> **3(API 토큰)과 4(OAuth)**는 M2(실제 Google 로그인) 전까지 끝내면 됩니다. 6~8은 개발·배포 중이나 배포 후에 합니다.
+> **3(API 토큰)과 4(IdP 클라이언트)**는 M2(실제 로그인) 전까지 끝내면 됩니다. 6~8은 개발·배포 중이나 배포 후에 합니다.
 
 ---
 
@@ -41,33 +41,14 @@
 - [ ] 생성 후 표시되는 토큰을 **한 번만** 복사해 안전한 곳에 보관합니다 → `CF_API_TOKEN`
 - [ ] 같은 페이지의 토큰 **Verify** 안내 명령으로 토큰이 유효한지 확인합니다(선택).
 
-## 4. Google OAuth 클라이언트 생성
+## 4. B-CUBE IdP 클라이언트 준비
 
-> Google Cloud Console의 OAuth 메뉴는 현재 **Google Auth Platform**이라는 이름으로 표시됩니다(이전 이름: OAuth consent screen / Credentials).
+> 이 서비스는 Google OAuth 클라이언트를 직접 쓰지 않습니다. 로그인은 B-CUBE IdP(`https://id.b-cube.kr`)가 처리합니다. 기존 Google 클라이언트(`bcube-domain` 프로젝트)는 전환 후 삭제합니다.
 
-- [ ] `console.cloud.google.com` → 새 프로젝트 `bcube-domain`을 생성합니다.
-- [ ] **Google Auth Platform** → 시작하기(또는 OAuth 동의 화면)에서 다음을 설정합니다.
-  - **App name**: `B-CUBE Domain`
-  - **User support email**: 관리자 이메일
-  - **Audience**: **External**
-    - ajou.ac.kr 조직 소속 프로젝트가 아니므로 Internal은 선택할 수 없습니다. 아주대 계정 제한은 서버에서 검증합니다.
-  - **Contact email**: 관리자 이메일
-- [ ] **Branding → Authorized domains**에 `b-cube.kr`을 추가합니다.
-  - 소유권 확인을 요구하면 Google Search Console에서 DNS TXT 방식으로 확인합니다. TXT 레코드는 Cloudflare DNS에서 직접 추가하세요.
-- [ ] **Data access(범위)**: `openid`, `.../auth/userinfo.email`, `.../auth/userinfo.profile`만 추가합니다. 민감한 범위는 넣지 마세요.
-- [ ] **Audience → Publishing status**를 **In production**으로 게시합니다.
-  - Testing 상태로 두면 등록한 테스트 사용자만 로그인할 수 있습니다.
-  - 기본 범위만 쓰므로 Google의 앱 심사는 필요 없습니다.
-- [ ] **Clients → Create client** → 유형 **Web application**을 선택하고 다음을 입력합니다.
-  - **Authorized JavaScript origins**
-    - `https://domain.b-cube.kr`
-    - `http://localhost:5173`
-  - **Authorized redirect URIs**
-    - `https://domain.b-cube.kr/auth/callback`
-    - `http://localhost:5173/auth/callback`
-- [ ] 생성된 값을 복사합니다.
-  - **Client ID** → `GOOGLE_CLIENT_ID`
-  - **Client secret** → `GOOGLE_CLIENT_SECRET`
+- [ ] IdP 저장소에서 `domain-console` 클라이언트의 `scopes`에 `sohakoe`를 추가합니다. `student`는 이미 있습니다. 빠지면 로그인이 `invalid_scope`로 실패합니다.
+- [ ] 로컬에서 실제 IdP 로그인을 시험하려면 같은 클라이언트의 `redirect_uris`에 `http://localhost:5173/auth/callback`을 추가합니다.
+- [ ] IdP에서 `pnpm client:secret`으로 `client_secret`을 만들고 해시를 반영해 배포합니다.
+- [ ] 받은 값을 `IDP_CLIENT_SECRET`으로 입력합니다(6번). `IDP_CLIENT_ID`는 `wrangler.jsonc`의 `domain-console`입니다.
 
 ## 5. 로컬 개발 환경
 
@@ -81,21 +62,22 @@
 > 시크릿 값은 Claude Code 대화창에 붙여 넣지 말고 **직접** 입력하세요.
 
 - [ ] 로컬 개발용: `cp .dev.vars.example .dev.vars`로 복사합니다. 기본값만으로 가짜 로그인 + dry-run이 동작합니다. `.gitignore`에 포함되어 있는지 확인하세요.
-  - 실제 Google 로그인을 시험할 때만 `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`을 채웁니다.
+  - 실제 IdP 로그인을 시험할 때만 `IDP_CLIENT_ID`/`IDP_CLIENT_SECRET`을 채웁니다.
   - `DNS_DRY_RUN=true`는 유지하고, 실제 DNS 변경 테스트는 마지막에만 합니다.
 - [ ] 로컬 UI 확인: `npm run db:reset` → `npm run dev` → `http://localhost:5173` 로그인 화면 하단의 페르소나 버튼(일반/한도 도달/신규/관리자/차단)으로 각 화면을 확인합니다.
 - [ ] 운영용: 터미널에서 직접 실행합니다.
   ```bash
-  npx wrangler secret put GOOGLE_CLIENT_SECRET
+  npx wrangler secret put IDP_CLIENT_SECRET
   npx wrangler secret put CF_API_TOKEN
   ```
-- [ ] `GOOGLE_CLIENT_ID`, `CF_ZONE_ID`, `ADMIN_EMAILS` 등 비밀이 아닌 값은 `wrangler.jsonc`의 `vars`에 들어가는지 확인합니다.
+- [ ] `IDP_CLIENT_ID`, `CF_ZONE_ID`, `ADMIN_EMAILS` 등 비밀이 아닌 값은 `wrangler.jsonc`의 `vars`에 들어가는지 확인합니다.
 
-## 7. 아주대 계정 `hd` 클레임 확인 (인증 단계 구현 후)
+## 7. 소학회 이름 확인 (운영 전환 전)
 
-- [ ] 로컬(`DEV_AUTH_DEBUG=true`)에서 **@ajou.ac.kr 계정**으로 로그인한 뒤 `/auth/debug` 화면에서 ID 토큰 클레임을 확인합니다.
-  - `hd: "ajou.ac.kr"`가 **있으면** → `REQUIRE_HD=true` (더 엄격한 검증)
-  - **없으면** → `REQUIRE_HD=false` (이메일 도메인 + `email_verified`로 검증)
+`REQUIRED_SOHAKOE`가 mhaksa의 실제 이름과 다르면 관리자를 뺀 모든 회원이 로그인할 수 없습니다.
+
+- [ ] 로컬(`DEV_AUTH_DEBUG=true`)에서 **B-CUBE 회원 계정**으로 로그인한 뒤 `/auth/debug` 화면에서 `sohakoe_memberships`를 확인합니다. 로그인이 거부되어도 클레임은 기록됩니다.
+- [ ] 표시된 이름이 대소문자를 빼고 `REQUIRED_SOHAKOE`(기본 `B-cube`)와 같은지 확인합니다. 다르면 `wrangler.jsonc`의 값을 고칩니다.
 - [ ] 확인이 끝나면 `DEV_AUTH_DEBUG`를 끕니다. 운영에서는 항상 꺼져 있어야 합니다.
 
 ## 8. 배포 후 검증 체크리스트

@@ -130,7 +130,7 @@
 
 <!-- 캡처 필요: 내 서브도메인 목록 화면 → images/service_main.png -->
 
-회원은 학교 Google 계정(@ajou.ac.kr)으로 로그인해 1인당 최대 3개의 `<name>.b-cube.kr`을 180일 동안 빌린다. 콘솔은 Cloudflare DNS API로 레코드를 만들고, 매시간 연결 대상을 확인해 주인 없는 주소를 스스로 일시 중지한다.
+회원은 B-CUBE IdP에서 학교 계정(@ajou.ac.kr)으로 로그인해 1인당 최대 3개의 `<name>.b-cube.kr`을 180일 동안 빌린다. 콘솔은 Cloudflare DNS API로 레코드를 만들고, 매시간 연결 대상을 확인해 주인 없는 주소를 스스로 일시 중지한다.
 
 ```mermaid
 flowchart LR
@@ -146,7 +146,7 @@ flowchart LR
 <!-- 캡처 필요: 로그인 화면, 내 서브도메인 목록 → images/screen_1.png -->
 
 #### 학교 계정 로그인
-사용자는 Google 계정으로 로그인한다. 시스템은 ID 토큰을 검증하고 이메일이 `@ajou.ac.kr`이며 인증된 주소인지 확인한다. 차단된 사용자는 거부 사유와 함께 로그인 화면으로 돌려보낸다.
+사용자는 B-CUBE IdP로 로그인한다. 시스템은 ID 토큰을 검증하고 이메일이 `@ajou.ac.kr`이며 인증된 주소인지, B-CUBE 소학회 이력이 있는지 확인한다. 관리자는 소학회 검사를 면제한다. 차단된 사용자는 거부 사유와 함께 로그인 화면으로 돌려보낸다.
 
 #### 상태 한눈에 보기
 사용자는 자신이 빌린 서브도메인을 표로 본다. 시스템은 상태(정상·일시 중지·만료)를 색 태그로, 만료일과 마지막 헬스체크 시각을 함께 보여주고, 만료 30일 이내이거나 일시 중지된 항목은 화면 상단에 안내한다. 한도(3개)에 도달하면 "새 서브도메인" 버튼을 비활성화하고 이유를 알려준다.
@@ -293,7 +293,7 @@ flowchart LR
         BE["Hono<br/>API · 인증 · CSRF"] -.- RDB[("D1 (SQLite)<br/>대여·세션·감사 로그")]
         CRON["Cron 3종<br/>헬스체크 · 만료 · 드리프트"] -.- RDB
     end
-    BE -.- GOOGLE["Google OAuth<br/>학교 계정 로그인"]
+    BE -.- IDP["B-CUBE IdP<br/>학교 계정, 소학회 확인"]
     BE -.- CF["Cloudflare DNS API<br/>b-cube.kr 존"]
     CRON -.- CF
     CRON -.- PROBE["DoH · HTTP · TCP<br/>연결 대상 확인"]
@@ -305,7 +305,7 @@ flowchart LR
 | 백엔드 | Hono, zod | 라우팅, 입력 검증(서버·화면 공용 스키마) |
 | RDB | Cloudflare D1 | 사용자, 세션(해시 저장), 대여, 레코드, 감사 로그, 드리프트 결과 |
 | DNS | Cloudflare DNS API | 레코드 생성·교체·삭제, comment 태그로 앱 관리 레코드 구분 |
-| 인증 | Google OAuth(PKCE), jose | ID 토큰 검증, `@ajou.ac.kr` 도메인 제한 |
+| 인증 | B-CUBE IdP(OIDC, PKCE), jose | ES256 ID 토큰 검증, `@ajou.ac.kr`과 소학회 회원 제한 |
 | 프론트엔드 | React, Vite, IBM Carbon | 목록·생성 4단계·상세·관리 4탭, 모바일 폭 지원 |
 | 상태 확인 | DoH, `cloudflare:sockets` | 헬스체크(CNAME 대상 조회, HTTP 응답, TCP 443/80) |
 
