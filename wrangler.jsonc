@@ -27,7 +27,7 @@
     // required secrets CF_ZONE_ID, CF_API_TOKEN, IDP_CLIENT_SECRET, ADMIN_EMAILS
     // optional secrets EXTRA_RESERVED_NAMES
     "IDP_ISSUER": "https://id.b-cube.kr",
-    "IDP_CLIENT_ID": "domain-console",
+    "IDP_CLIENT_ID": "dyn-f6c226535e6a490f8ff1",
     "ALLOWED_EMAIL_DOMAIN": "ajou.ac.kr",
     "REQUIRED_SOHAKOE": "B-cube",
     "MAX_LEASES_PER_USER": "3",
