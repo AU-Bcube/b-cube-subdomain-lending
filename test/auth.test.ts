@@ -4,7 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { sha256Base64url } from "../worker/auth/crypto";
 import { evaluateLogin } from "../worker/auth/login";
 import { parseConfig } from "../worker/env";
-import { auditFor, call, createUser, login, ORIGIN, uid, workerWith } from "./helpers";
+import { auditFor, call, createLease, createUser, login, ORIGIN, uid, workerWith } from "./helpers";
 
 const CLIENT_ID = "test-client-id"; // vitest.config.ts 바인딩과 같은 값
 const CLIENT_SECRET = "test-client-secret";
@@ -214,6 +214,32 @@ describe("GET /auth/callback — 허용", () => {
     expect(row).toBeTruthy();
   });
 
+  it("기존 사용자는 email로 연결하고 sub를 갱신하며 소유한 lease를 유지한다", async () => {
+    const email = `link-${uid()}@ajou.ac.kr`;
+    await createUser(email, { name: "기존 이름" });
+    const leaseId = await createLease({ name: `link-${uid()}`, owner: email });
+    const { callback } = await oauthLogin(idpClaims(email, { sub: `new-sub-${email}` }));
+    expect(location(callback)).toBe("/");
+    const user = await env.DB.prepare(`SELECT idp_sub, name FROM users WHERE email = ?`).bind(email).first();
+    expect(user).toEqual({ idp_sub: `new-sub-${email}`, name: "테스트" });
+    const session = setCookies(callback).get("bcd_session");
+    const res = await SELF.fetch(`${ORIGIN}/api/leases/${leaseId}`, { headers: { Cookie: `bcd_session=${session}` } });
+    expect(res.status).toBe(200);
+  });
+
+  it("sub가 같으면 email이 바뀌어도 같은 계정으로 로그인한다", async () => {
+    const id = uid();
+    const oldEmail = `old-${id}@ajou.ac.kr`;
+    const newEmail = `new-${id}@ajou.ac.kr`;
+    await oauthLogin(idpClaims(oldEmail, { sub: `same-${id}` }));
+    const { callback } = await oauthLogin(idpClaims(newEmail, { sub: `same-${id}` }));
+    expect(location(callback)).toBe("/");
+    const session = setCookies(callback).get("bcd_session");
+    const me = await SELF.fetch(`${ORIGIN}/api/me`, { headers: { Cookie: `bcd_session=${session}` } });
+    expect(await me.json()).toMatchObject({ email: oldEmail });
+    expect(await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(newEmail).first()).toBeNull();
+  });
+
   it("소학회 이름은 대소문자를 구분하지 않고, 기간은 보지 않는다", async () => {
     const sohakoe_memberships = [{ name: " B-CUBE ", year: "2019", semester: "20" }];
     const { callback } = await oauthLogin(idpClaims(`case-${uid()}@ajou.ac.kr`, { sohakoe_memberships }));
@@ -288,6 +314,13 @@ describe("GET /auth/callback — 거부", () => {
     const email = `nosave-${uid()}@ajou.ac.kr`;
     await expectDenied(idpClaims(email, { sohakoe_memberships: [] }), "sohakoe_required");
     expect(await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(email).first()).toBeNull();
+  });
+
+  it("차단된 사용자는 email이 바뀌어도 sub로 거부한다", async () => {
+    const id = uid();
+    const email = `ban-sub-${id}@ajou.ac.kr`;
+    await createUser(email, { banned: true });
+    await expectDenied(idpClaims(`other-${id}@ajou.ac.kr`, { sub: `sub-${email}` }), "banned");
   });
 
   it("차단된 사용자", async () => {

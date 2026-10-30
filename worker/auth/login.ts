@@ -54,10 +54,13 @@ export async function completeLogin(
   const db = c.env.DB;
   const email = identity.email.trim().toLowerCase();
   const devDetail = options.dev ? { dev: true } : {};
-  const existing = await db
-    .prepare(`SELECT banned_at FROM users WHERE email = ?`)
-    .bind(email)
-    .first<{ banned_at: number | null }>();
+  // 사용자는 sub로 식별한다. email은 sub가 처음 보일 때 기존 계정을 잇는 데만 쓴다.
+  const { results: matches } = await db
+    .prepare(`SELECT email, idp_sub, banned_at FROM users WHERE idp_sub = ? OR email = ?`)
+    .bind(identity.sub, email)
+    .all<{ email: string; idp_sub: string; banned_at: number | null }>();
+  const existing = matches.find((u) => u.idp_sub === identity.sub) ?? matches[0] ?? null;
+  const accountEmail = existing?.email ?? email;
 
   const decision = evaluateLogin(c.var.config, { ...identity, email }, existing);
   if (!decision.ok) {
@@ -85,7 +88,7 @@ export async function completeLogin(
          last_login_at = excluded.last_login_at`,
     )
     .bind(
-      email,
+      accountEmail,
       identity.sub,
       identity.name ?? null,
       identity.studentId ?? null,
@@ -95,12 +98,12 @@ export async function completeLogin(
     )
     .run();
 
-  await createSession(c, email);
+  await createSession(c, accountEmail);
   await writeAudit(db, {
     action: "auth.login",
-    actorEmail: email,
-    actorRole: c.var.config.adminEmails.has(email) ? "admin" : "user",
-    targetEmail: email,
+    actorEmail: accountEmail,
+    actorRole: c.var.config.adminEmails.has(accountEmail) ? "admin" : "user",
+    targetEmail: accountEmail,
     detail: Object.keys(devDetail).length ? devDetail : undefined,
     ...requestMeta(c),
   });
