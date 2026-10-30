@@ -24,7 +24,14 @@ export const devAuthRoutes = new Hono<HonoEnv>().get("/dev-login", async (c) => 
   if (!persona) return apiError(c, 400, "unknown_persona", "알 수 없는 페르소나입니다.");
   return completeLogin(
     c,
-    { sub: persona.sub, email: persona.email, emailVerified: true, hd: "ajou.ac.kr", name: persona.name },
+    {
+      sub: persona.sub,
+      email: persona.email,
+      emailVerified: true,
+      name: persona.name,
+      studentId: persona.studentId,
+      sohakoeMemberships: [{ name: c.var.config.requiredSohakoe, year: "2026", semester: "10" }],
+    },
     { dev: true },
   );
 });
@@ -41,15 +48,15 @@ export const devDebugRoutes = new Hono<HonoEnv>().get("/debug", (c) => {
         ["시각", new Date(claims.at).toISOString()],
         ["email", claims.email],
         ["email_verified", String(claims.email_verified)],
-        ["hd", claims.hd ?? "(없음)"],
+        ["sohakoe_memberships", claims.sohakoe.join(", ") || "(없음)"],
       ]
         .map(([k, v]) => `<tr><th>${escapeHtml(k!)}</th><td><code>${escapeHtml(v!)}</code></td></tr>`)
         .join("")
     : "";
   const body = claims
     ? `<table>${rows}</table>
-       <p>hd가 <code>${escapeHtml(c.var.config.allowedEmailDomain)}</code>이면 <code>REQUIRE_HD=true</code>, 없으면 <code>REQUIRE_HD=false</code>로 설정한다.</p>`
-    : `<p>기록된 로그인이 없습니다. <a href="/auth/login">Google로 로그인</a>한 뒤 다시 여세요. (dev 서버를 재시작하면 기록이 사라집니다)</p>`;
+       <p><code>REQUIRED_SOHAKOE</code>(현재 <code>${escapeHtml(c.var.config.requiredSohakoe)}</code>)는 위 소학회 이름과 대소문자를 빼고 같아야 한다.</p>`
+    : `<p>기록된 로그인이 없습니다. <a href="/auth/login">B-CUBE 계정으로 로그인</a>한 뒤 다시 여세요. (dev 서버를 재시작하면 기록이 사라집니다)</p>`;
   return c.html(`<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><title>Auth debug</title>
 <style>body{font-family:system-ui,sans-serif;margin:2rem;max-width:40rem}th{text-align:left;padding-right:1rem}td,th{padding:.25rem 0}</style>

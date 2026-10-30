@@ -224,6 +224,7 @@
 | 2026-10-27: dry-run 드리프트 결과 안내 | §10.3 |
 | 2026-10-28: 작업 기록 수동 복구 API·버튼, 복구 잠금 3분(`job_locks`), `repair` 예약 즉시 처리 | §5, §8, §9, §10.2, §11 |
 | 2026-10-28: DNS 작업 기록(`dns_ops`)과 lease 단위 자동 복구, 드리프트 점검의 안전한 자동 복구("Cloudflare에만 있음" 제외), 상세 화면 `dnsState`, 조작 근거에 `dns_ops.cf_ids` 추가 | §0-4, §5, §8, §9, §10.2, §10.3, §11 |
+| 2026-10-30: 인증을 Google OAuth 직접 호출에서 B-CUBE IdP(OIDC)로 일괄 전환. `REQUIRE_HD`, `hd` 검사, 관리자 도메인 면제 제거. `REQUIRED_SOHAKOE` 소학회 회원 검사 추가(이력 존재만 확인, 관리자 면제). `users.google_sub`를 `idp_sub`로 변경하고 `student_id`, `sohakoe_memberships` 추가(`migrations/0005_idp_users.sql`). sub 우선 계정 조회, CSP에서 Google 주소 제거 | §4, §5, §6.1, §6.4, §12 |
 | 2026-10-28: 코드 표시 폰트 D2Coding (jsDelivr) | 디자인 |
 | 2026-10-28: 폰트를 jsDelivr CDN에서 불러오고 CSP에 `cdn.jsdelivr.net` 추가 | §6.4, 디자인 |
 | 2026-10-28: 드리프트 cron 요일을 `0`에서 `SUN`으로 변경 (Cloudflare cron은 요일 `0`을 받지 않음) | §4, §10.3 |
@@ -238,8 +239,9 @@
 
 ## 5. 다음 작업
 
-1. 로컬 D1 재시드: `npm run db:reset` (시드에 `suspended_at` 추가. 0002 마이그레이션은 로컬에 적용 완료)
+0. B-CUBE IdP 전환 마무리 (2026-10-30, 코드와 테스트 완료, #15 리뷰·배포 전): 동적 등록 완료(RFC 7591, `client_id` `dyn-f6c226535e6a490f8ff1`을 `IDP_CLIENT_ID`에 반영, 2026-10-30). 남은 일은 등록 토큰 폐기(작업 중 `wrangler.jsonc`에 들어갔다가 제거, 커밋되지 않음), 관리자 승인(`b_cube_status: pending`), `IDP_CLIENT_SECRET` 입력, `/auth/debug`로 실제 소학회 이름 확인, 원격 마이그레이션 직후 배포, 기존 Google 클라이언트 삭제 (사용자)
+1. 로컬 D1 재시드: `npm run db:reset` (시드에 `suspended_at` 추가. 0002 마이그레이션은 로컬에 적용 완료. 0005 적용도 이 명령으로 된다)
 2. 화면 확인 (사용자): 1.15(`dev`, `preview`), 5.12(375px), 5.13(페르소나별), 6.13(관리 탭 4개)
-3. 실제 Google 계정으로 로그인하고 `/auth/debug`에서 `hd` 확인 → `REQUIRE_HD` 결정 (사용자)
+3. 실제 IdP로 로그인하고 `/auth/debug`에서 소학회 이름 확인 → `REQUIRED_SOHAKOE` 확정 (사용자)
 4. 7.4: 벤더별 주인 없음 응답 실측 후 `VENDOR_SIGNATURES` 확정
 5. M8 배포(8.3, 8.5~8.8): cron 수정 반영해 `npm run deploy` 다시 실행, Workers 대시보드 Triggers에 cron 3개 확인. 운영에 영향을 주는 명령이므로 사용자 확인 후 실행

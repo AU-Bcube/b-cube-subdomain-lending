@@ -24,10 +24,12 @@
     "APP_ORIGIN": "https://domain.b-cube.kr",
     "ZONE_NAME": "b-cube.kr",
     // npx wrangler secret put <SECRET_NAME>
-    // required secrets CF_ZONE_ID, CF_API_TOKEN, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ADMIN_EMAILS
+    // required secrets CF_ZONE_ID, CF_API_TOKEN, IDP_CLIENT_SECRET, ADMIN_EMAILS
     // optional secrets EXTRA_RESERVED_NAMES
+    "IDP_ISSUER": "https://id.b-cube.kr",
+    "IDP_CLIENT_ID": "dyn-f6c226535e6a490f8ff1",
     "ALLOWED_EMAIL_DOMAIN": "ajou.ac.kr",
-    "REQUIRE_HD": "true",
+    "REQUIRED_SOHAKOE": "B-cube",
     "MAX_LEASES_PER_USER": "3",
     "LEASE_DAYS": "180",
     "RENEW_WINDOW_DAYS": "30",

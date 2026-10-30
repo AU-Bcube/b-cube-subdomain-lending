@@ -5,7 +5,9 @@ interface __BaseEnv_Env {
 	DB: D1Database;
 	ZONE_NAME: "b-cube.kr";
 	ALLOWED_EMAIL_DOMAIN: "ajou.ac.kr";
-	REQUIRE_HD: "false";
+	REQUIRED_SOHAKOE: "B-cube";
+	IDP_ISSUER: "https://id.b-cube.kr";
+	IDP_CLIENT_ID: "domain-console";
 	MAX_LEASES_PER_USER: "3";
 	LEASE_DAYS: "180";
 	RENEW_WINDOW_DAYS: "30";
@@ -17,8 +19,7 @@ interface __BaseEnv_Env {
 	DEV_FAKE_LOGIN: string;
 	DEV_AUTH_DEBUG: string;
 	DNS_DRY_RUN: string;
-	GOOGLE_CLIENT_ID: string;
-	GOOGLE_CLIENT_SECRET: string;
+	IDP_CLIENT_SECRET: string;
 	CF_ZONE_ID: string;
 	CF_API_TOKEN: string;
 	ADMIN_EMAILS: string;
@@ -31,7 +32,7 @@ type StringifyValues<EnvType extends Record<string, unknown>> = {
 	[Binding in keyof EnvType]: EnvType[Binding] extends string ? EnvType[Binding] : string;
 };
 declare namespace NodeJS {
-	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "ZONE_NAME" | "ALLOWED_EMAIL_DOMAIN" | "REQUIRE_HD" | "MAX_LEASES_PER_USER" | "LEASE_DAYS" | "RENEW_WINDOW_DAYS" | "NAME_HOLD_DAYS" | "HEALTH_GRACE_DAYS" | "HEALTH_FAIL_THRESHOLD" | "EXTRA_RESERVED_NAMES" | "APP_ORIGIN" | "DEV_FAKE_LOGIN" | "DEV_AUTH_DEBUG" | "DNS_DRY_RUN" | "GOOGLE_CLIENT_ID" | "GOOGLE_CLIENT_SECRET" | "CF_ZONE_ID" | "CF_API_TOKEN" | "ADMIN_EMAILS">> {}
+	interface ProcessEnv extends StringifyValues<Pick<Cloudflare.Env, "ZONE_NAME" | "ALLOWED_EMAIL_DOMAIN" | "REQUIRED_SOHAKOE" | "IDP_ISSUER" | "IDP_CLIENT_ID" | "MAX_LEASES_PER_USER" | "LEASE_DAYS" | "RENEW_WINDOW_DAYS" | "NAME_HOLD_DAYS" | "HEALTH_GRACE_DAYS" | "HEALTH_FAIL_THRESHOLD" | "EXTRA_RESERVED_NAMES" | "APP_ORIGIN" | "DEV_FAKE_LOGIN" | "DEV_AUTH_DEBUG" | "DNS_DRY_RUN" | "IDP_CLIENT_SECRET" | "CF_ZONE_ID" | "CF_API_TOKEN" | "ADMIN_EMAILS">> {}
 }
 declare module "*.txt" {
 	const value: string;

@@ -1,6 +1,6 @@
 # B-CUBE Domain Console
 
-아주대 동아리 B-CUBE 회원(@ajou.ac.kr Google 계정)이 `<name>.b-cube.kr` 서브도메인을 빌려 Vercel, 서버 IP(AWS 등), 기타 CNAME 대상에 연결하는 웹 콘솔입니다.
+아주대 동아리 B-CUBE 회원(@ajou.ac.kr 계정)이 `<name>.b-cube.kr` 서브도메인을 빌려 Vercel, 서버 IP(AWS 등), 기타 CNAME 대상에 연결하는 웹 콘솔입니다.
 
 - 주소: `https://domain.b-cube.kr`
 - 구성: Cloudflare Workers 하나 (Hono API + React/Carbon SPA + Cron), D1, Cloudflare DNS API
@@ -29,9 +29,11 @@ npm run dev                      # → http://localhost:5173
 
 > 시드의 `member1`은 사용 중 2개 + 일시 중지 1개로 이미 한도(3개)에 도달해 있습니다. 생성 흐름은 `newbie`로 확인하세요.
 
-### 실제 Google 로그인 시험
+### 실제 IdP 로그인 시험
 
-`.dev.vars`에 `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`을 채웁니다. Google 클라이언트의 리디렉션 URI에 `http://localhost:5173/auth/callback`이 있어야 합니다. `DEV_AUTH_DEBUG=true`이면 `/auth/debug`에서 마지막 로그인의 `email`, `email_verified`, `hd`를 볼 수 있습니다.
+`.dev.vars`에 `IDP_CLIENT_ID`, `IDP_CLIENT_SECRET`을 채웁니다. IdP에 등록한 클라이언트의 `redirect_uris`에 `http://localhost:5173/auth/callback`이 있어야 합니다. issuer는 `wrangler.jsonc`의 `IDP_ISSUER`이고, 로컬 IdP를 쓰려면 `.dev.vars`에 `IDP_ISSUER`를 덧붙입니다. `DEV_AUTH_DEBUG=true`이면 `/auth/debug`에서 마지막 로그인의 `email`, `email_verified`, 소학회 이름을 볼 수 있습니다.
+
+로그인에는 `REQUIRED_SOHAKOE`(기본 `B-cube`, 대소문자 무시) 소학회 이력이 필요합니다. `ADMIN_EMAILS`만 면제입니다. 개발용 가짜 로그인 페르소나는 이 소학회 회원으로 취급합니다.
 
 ### 실제 Cloudflare DNS 시험
 
@@ -72,14 +74,15 @@ curl "http://localhost:5173/cdn-cgi/handler/scheduled?cron=30+18+*+*+SUN"  # 드
 
 1. Cloudflare 로그인: `npx wrangler login`
 2. D1 생성: `npx wrangler d1 create bcube-domain` → 출력된 `database_id`를 `wrangler.jsonc`에 기입
-3. `wrangler.jsonc`의 `vars` 기입: `CF_ZONE_ID`, `GOOGLE_CLIENT_ID`, `ADMIN_EMAILS`, `REQUIRE_HD`(체크리스트 7번 결과)
+3. `wrangler.jsonc`의 `vars` 기입: `CF_ZONE_ID`, `ADMIN_EMAILS`, `REQUIRED_SOHAKOE`(체크리스트 7번 결과)
    - `APP_ORIGIN`은 `https://domain.b-cube.kr`, `DNS_DRY_RUN`·`DEV_FAKE_LOGIN`·`DEV_AUTH_DEBUG`는 모두 `"false"`여야 합니다. 하나라도 true면 모든 요청이 500이 됩니다(안전장치).
 4. 시크릿 입력 (값은 터미널에 직접 입력):
    ```bash
-   npx wrangler secret put GOOGLE_CLIENT_SECRET
+   npx wrangler secret put IDP_CLIENT_SECRET
    npx wrangler secret put CF_API_TOKEN
    ```
 5. 원격 마이그레이션: `npx wrangler d1 migrations apply bcube-domain --remote`
+   - `0005`는 `users.google_sub` 이름을 바꿉니다. 이미 운영 중이면 예전 코드의 로그인이 실패하므로 바로 6번을 실행합니다. 기존 세션은 영향이 없습니다.
 6. 배포: `npm run deploy`
    - `routes`의 `custom_domain: true`로 `domain.b-cube.kr`이 Worker에 연결됩니다. 기존 `domain.b-cube.kr` DNS 레코드가 있으면 먼저 지워야 합니다.
 7. 배포 후 확인: [docs/01-manual-checklist.md](docs/01-manual-checklist.md) 8번 체크리스트

@@ -62,7 +62,7 @@ const firstLogin: Record<string, number> = {
 };
 const users = DEV_PERSONAS.map((p) => ({
   email: p.email,
-  google_sub: p.sub,
+  idp_sub: p.sub,
   name: p.name,
   first_login_at: firstLogin[p.email] ?? ago(30),
   last_login_at: p.as === "banned" ? ago(21) : ago(0, 3),
@@ -248,18 +248,18 @@ const audits: SeedAudit[] = [
   // 로그인 / 거부
   { at: ago(59, 2), actor: admin, role: "admin", action: "auth.login", target: admin },
   { at: ago(58, 5), actor: member1, role: "user", action: "auth.login", target: member1 },
-  { at: ago(57, 1), actor: "outsider@gmail.com", role: "user", action: "auth.login_denied", target: "outsider@gmail.com", detail: { reason: "domain_not_allowed", hd: null } },
+  { at: ago(57, 1), actor: "outsider@gmail.com", role: "user", action: "auth.login_denied", target: "outsider@gmail.com", detail: { reason: "domain_not_allowed" } },
   { at: ago(55, 3), actor: member2, role: "user", action: "auth.login", target: member2 },
   { at: ago(50, 4), actor: member1, role: "user", action: "auth.login", target: member1 },
   { at: ago(45, 6), actor: banned, role: "user", action: "auth.login", target: banned },
-  { at: ago(44, 2), actor: "student@ajou.ac.kr", role: "user", action: "auth.login_denied", target: "student@ajou.ac.kr", detail: { reason: "email_unverified", hd: "ajou.ac.kr" } },
+  { at: ago(44, 2), actor: "student@ajou.ac.kr", role: "user", action: "auth.login_denied", target: "student@ajou.ac.kr", detail: { reason: "email_unverified" } },
   { at: ago(38, 3), actor: member2, role: "user", action: "auth.login", target: member2 },
   { at: ago(30, 1), actor: member2, role: "user", action: "auth.logout", target: member2 },
   { at: ago(25, 2), actor: admin, role: "admin", action: "auth.login", target: admin },
-  { at: ago(19, 8), actor: banned, role: "user", action: "auth.login_denied", target: banned, detail: { reason: "banned", hd: "ajou.ac.kr" } },
+  { at: ago(19, 8), actor: banned, role: "user", action: "auth.login_denied", target: banned, detail: { reason: "banned" } },
   { at: ago(7, 4), actor: member1, role: "user", action: "auth.login", target: member1 },
   { at: ago(1, 2), actor: newbie, role: "user", action: "auth.login", target: newbie },
-  { at: ago(0, 6), actor: "hacker@naver.com", role: "user", action: "auth.login_denied", target: "hacker@naver.com", detail: { reason: "domain_not_allowed", hd: null } },
+  { at: ago(0, 6), actor: "hacker@naver.com", role: "user", action: "auth.login_denied", target: "hacker@naver.com", detail: { reason: "domain_not_allowed" } },
 
   // 생성
   { at: ago(60), actor: member1, role: "user", action: "lease.create", lease: L["alice-blog"]!.id, target: member1, detail: { name: "alice-blog", targetKind: "vercel", after: L["alice-blog"]!.records.slice(0, 1) } },
@@ -354,9 +354,9 @@ sql.push(
 
 for (const u of users) {
   sql.push(
-    `INSERT INTO users (email, google_sub, name, first_login_at, last_login_at, banned_at, ban_reason) VALUES (${[
+    `INSERT INTO users (email, idp_sub, name, first_login_at, last_login_at, banned_at, ban_reason) VALUES (${[
       u.email,
-      u.google_sub,
+      u.idp_sub,
       u.name,
       u.first_login_at,
       u.last_login_at,

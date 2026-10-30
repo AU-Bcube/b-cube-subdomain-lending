@@ -2,48 +2,51 @@ import { env, SELF } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT, type JWTPayload } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Base64url } from "../worker/auth/crypto";
-import { GOOGLE_JWKS_URL, GOOGLE_TOKEN_URL } from "../worker/auth/google";
 import { evaluateLogin } from "../worker/auth/login";
 import { parseConfig } from "../worker/env";
-import { auditFor, call, createUser, login, ORIGIN, uid, workerWith } from "./helpers";
+import { auditFor, call, createLease, createUser, login, ORIGIN, uid, workerWith } from "./helpers";
 
 const CLIENT_ID = "test-client-id"; // vitest.config.ts 바인딩과 같은 값
+const CLIENT_SECRET = "test-client-secret";
+const ISSUER = "https://idp.test";
 const PROD_ORIGIN = "https://domain.b-cube.kr";
 
 // ---------------------------------------------------------------------------
-// 가짜 Google: 테스트 키로 서명한 id_token과 JWKS를 돌려준다.
+// 가짜 IdP: 테스트 키로 서명한 id_token과 JWKS를 돌려준다.
 // ---------------------------------------------------------------------------
 let privateKey: CryptoKey;
 let publicJwk: Record<string, unknown>;
 let tokenRequests: URLSearchParams[] = [];
+let tokenAuthHeaders: Array<string | null> = [];
 /** 다음 token endpoint 응답에 담을 id_token 클레임(오버라이드). null이면 400 응답 */
 let nextClaims: ((nonce: string) => JWTPayload) | null = null;
 let currentNonce = "";
 
 beforeAll(async () => {
-  const pair = await generateKeyPair("RS256", { extractable: true });
+  const pair = await generateKeyPair("ES256", { extractable: true });
   privateKey = pair.privateKey;
-  publicJwk = { ...(await exportJWK(pair.publicKey)), kid: "test-kid", alg: "RS256", use: "sig" };
+  publicJwk = { ...(await exportJWK(pair.publicKey)), kid: "test-kid", alg: "ES256", use: "sig" };
 });
 
-async function signIdToken(payload: JWTPayload, opts: { key?: CryptoKey; expiresIn?: string } = {}) {
+async function signIdToken(payload: JWTPayload, opts: { key?: CryptoKey; expiresIn?: string; alg?: string } = {}) {
   return new SignJWT(payload)
-    .setProtectedHeader({ alg: "RS256", kid: "test-kid" })
+    .setProtectedHeader({ alg: opts.alg ?? "ES256", kid: "test-kid" })
     .setIssuedAt()
     .setExpirationTime(opts.expiresIn ?? "5m")
     .sign(opts.key ?? privateKey);
 }
 
-function googleClaims(email: string, extra: JWTPayload = {}): (nonce: string) => JWTPayload {
+function idpClaims(email: string, extra: JWTPayload = {}): (nonce: string) => JWTPayload {
   return (nonce) => ({
-    iss: "https://accounts.google.com",
+    iss: ISSUER,
     aud: CLIENT_ID,
     sub: `google-${email}`,
     email,
     email_verified: true,
-    hd: email.split("@")[1],
     name: "테스트",
     nonce,
+    student: { id: "202600123", name: "홍길동", department: "소프트웨어학과" },
+    sohakoe_memberships: [{ name: "B-Cube", year: "2026", semester: "10" }],
     ...extra,
   });
 }
@@ -52,21 +55,23 @@ let signOverride: ((payload: JWTPayload) => Promise<string>) | null = null;
 
 beforeEach(() => {
   tokenRequests = [];
+  tokenAuthHeaders = [];
   nextClaims = null;
   signOverride = null;
   const realFetch = globalThis.fetch;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = input instanceof Request ? input.url : String(input);
-    if (url === GOOGLE_JWKS_URL) {
+    if (url === `${ISSUER}/jwks.json`) {
       return Response.json({ keys: [publicJwk] });
     }
-    if (url === GOOGLE_TOKEN_URL) {
+    if (url === `${ISSUER}/token`) {
       const body = new URLSearchParams(String(init?.body ?? ""));
       tokenRequests.push(body);
+      tokenAuthHeaders.push(new Headers(init?.headers).get("Authorization"));
       if (!nextClaims) return Response.json({ error: "invalid_grant" }, { status: 400 });
       const payload = nextClaims(currentNonce);
       const idToken = signOverride ? await signOverride(payload) : await signIdToken(payload);
-      return Response.json({ access_token: "at", id_token: idToken, token_type: "Bearer", expires_in: 3600 });
+      return Response.json({ access_token: "at", id_token: idToken, token_type: "Bearer", expires_in: 300 });
     }
     return realFetch(input, init);
   });
@@ -86,10 +91,10 @@ function setCookies(res: Response): Map<string, string> {
   return map;
 }
 
-/** /auth/login → (가짜 Google) → /auth/callback 전체 흐름 */
+/** /auth/login → (가짜 IdP) → /auth/callback 전체 흐름 */
 async function oauthLogin(
   claims: ((nonce: string) => JWTPayload) | null,
-  opts: { tamperState?: boolean; dropCookie?: boolean; fetcher?: (req: Request) => Promise<Response> } = {},
+  opts: { tamperState?: boolean; dropCookie?: boolean; iss?: string | null; fetcher?: (req: Request) => Promise<Response> } = {},
 ) {
   const fetcher = opts.fetcher ?? ((req: Request) => SELF.fetch(req));
   const start = await fetcher(new Request(`${ORIGIN}/auth/login`, { redirect: "manual" }));
@@ -100,8 +105,10 @@ async function oauthLogin(
   nextClaims = claims;
 
   const state = opts.tamperState ? "x".repeat(43) : authUrl.searchParams.get("state")!;
+  const iss = opts.iss === undefined ? ISSUER : opts.iss;
+  const issParam = iss === null ? "" : `&iss=${encodeURIComponent(iss)}`;
   const callback = await fetcher(
-    new Request(`${ORIGIN}/auth/callback?code=test-code&state=${encodeURIComponent(state)}`, {
+    new Request(`${ORIGIN}/auth/callback?code=test-code&state=${encodeURIComponent(state)}${issParam}`, {
       redirect: "manual",
       headers: opts.dropCookie ? {} : { Cookie: `bcd_oauth=${oauthCookie}` },
     }),
@@ -125,18 +132,18 @@ const PROD_VARS = {
 // ---------------------------------------------------------------------------
 
 describe("GET /auth/login", () => {
-  it("state·nonce·PKCE를 만들고 Google로 리다이렉트한다", async () => {
+  it("state·nonce·PKCE를 만들고 IdP로 리다이렉트한다", async () => {
     const res = await SELF.fetch(`${ORIGIN}/auth/login`, { redirect: "manual" });
     expect(res.status).toBe(302);
     const url = new URL(res.headers.get("Location")!);
-    expect(`${url.origin}${url.pathname}`).toBe("https://accounts.google.com/o/oauth2/v2/auth");
+    expect(`${url.origin}${url.pathname}`).toBe(`${ISSUER}/authorize`);
     const p = url.searchParams;
     expect(p.get("response_type")).toBe("code");
     expect(p.get("client_id")).toBe(CLIENT_ID);
     expect(p.get("redirect_uri")).toBe(`${ORIGIN}/auth/callback`);
-    expect(p.get("scope")).toBe("openid email profile");
-    expect(p.get("hd")).toBe("ajou.ac.kr");
-    expect(p.get("prompt")).toBe("select_account");
+    expect(p.get("scope")).toBe("openid email profile student sohakoe");
+    expect(p.has("hd")).toBe(false);
+    expect(p.has("prompt")).toBe(false);
     expect(p.get("code_challenge_method")).toBe("S256");
 
     const [line] = res.headers.getSetCookie().filter((l) => l.startsWith("bcd_oauth="));
@@ -164,7 +171,7 @@ describe("GET /auth/login", () => {
 describe("GET /auth/callback — 허용", () => {
   it("@ajou.ac.kr + email_verified → 세션 생성, users upsert, 감사 로그", async () => {
     const email = `ok-${uid()}@ajou.ac.kr`;
-    const { callback, oauthCookie } = await oauthLogin(googleClaims(email));
+    const { callback, oauthCookie } = await oauthLogin(idpClaims(email));
     expect(callback.status).toBe(302);
     expect(location(callback)).toBe("/");
 
@@ -174,6 +181,9 @@ describe("GET /auth/callback — 허용", () => {
     expect(tokenRequests[0]?.get("code")).toBe("test-code");
     expect(tokenRequests[0]?.get("redirect_uri")).toBe(`${ORIGIN}/auth/callback`);
     expect(tokenRequests[0]?.get("grant_type")).toBe("authorization_code");
+    // client_secret_basic: 비밀값은 본문이 아니라 Authorization 헤더로 보낸다.
+    expect(tokenRequests[0]?.has("client_secret")).toBe(false);
+    expect(tokenAuthHeaders[0]).toBe(`Basic ${btoa(`${CLIENT_ID}:${CLIENT_SECRET}`)}`);
 
     const cookies = setCookies(callback);
     expect(cookies.get("bcd_oauth")).toBe(""); // 1회용 쿠키 삭제
@@ -184,8 +194,13 @@ describe("GET /auth/callback — 허용", () => {
     expect(me.status).toBe(200);
     expect(await me.json()).toMatchObject({ email, isAdmin: false });
 
-    const user = await env.DB.prepare(`SELECT google_sub, name FROM users WHERE email = ?`).bind(email).first();
-    expect(user).toEqual({ google_sub: `google-${email}`, name: "테스트" });
+    const user = await env.DB.prepare(`SELECT idp_sub, name, student_id, sohakoe_memberships FROM users WHERE email = ?`).bind(email).first();
+    expect(user).toEqual({
+      idp_sub: `google-${email}`,
+      name: "테스트",
+      student_id: "202600123",
+      sohakoe_memberships: JSON.stringify([{ name: "B-Cube", year: "2026", semester: "10" }]),
+    });
     const logs = await auditFor({ action: "auth.login", targetEmail: email });
     expect(logs).toHaveLength(1);
     expect(logs[0]?.detail).toBeNull(); // 실제 로그인은 dev 표시 없음
@@ -193,29 +208,57 @@ describe("GET /auth/callback — 허용", () => {
 
   it("이메일은 소문자로 정규화한다", async () => {
     const id = uid();
-    const { callback } = await oauthLogin(googleClaims(`Mixed-${id}@AJOU.ac.kr`, { hd: "ajou.ac.kr" }));
+    const { callback } = await oauthLogin(idpClaims(`Mixed-${id}@AJOU.ac.kr`));
     expect(location(callback)).toBe("/");
     const row = await env.DB.prepare(`SELECT email FROM users WHERE email = ?`).bind(`mixed-${id}@ajou.ac.kr`).first();
     expect(row).toBeTruthy();
   });
 
-  it("iss가 accounts.google.com(스킴 없음)이어도 허용", async () => {
-    const { callback } = await oauthLogin(googleClaims(`iss-${uid()}@ajou.ac.kr`, { iss: "accounts.google.com" }));
+  it("기존 사용자는 email로 연결하고 sub를 갱신하며 소유한 lease를 유지한다", async () => {
+    const email = `link-${uid()}@ajou.ac.kr`;
+    await createUser(email, { name: "기존 이름" });
+    const leaseId = await createLease({ name: `link-${uid()}`, owner: email });
+    const { callback } = await oauthLogin(idpClaims(email, { sub: `new-sub-${email}` }));
+    expect(location(callback)).toBe("/");
+    const user = await env.DB.prepare(`SELECT idp_sub, name FROM users WHERE email = ?`).bind(email).first();
+    expect(user).toEqual({ idp_sub: `new-sub-${email}`, name: "테스트" });
+    const session = setCookies(callback).get("bcd_session");
+    const res = await SELF.fetch(`${ORIGIN}/api/leases/${leaseId}`, { headers: { Cookie: `bcd_session=${session}` } });
+    expect(res.status).toBe(200);
+  });
+
+  it("sub가 같으면 email이 바뀌어도 같은 계정으로 로그인한다", async () => {
+    const id = uid();
+    const oldEmail = `old-${id}@ajou.ac.kr`;
+    const newEmail = `new-${id}@ajou.ac.kr`;
+    await oauthLogin(idpClaims(oldEmail, { sub: `same-${id}` }));
+    const { callback } = await oauthLogin(idpClaims(newEmail, { sub: `same-${id}` }));
+    expect(location(callback)).toBe("/");
+    const session = setCookies(callback).get("bcd_session");
+    const me = await SELF.fetch(`${ORIGIN}/api/me`, { headers: { Cookie: `bcd_session=${session}` } });
+    expect(await me.json()).toMatchObject({ email: oldEmail });
+    expect(await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(newEmail).first()).toBeNull();
+  });
+
+  it("소학회 이름은 대소문자를 구분하지 않고, 기간은 보지 않는다", async () => {
+    const sohakoe_memberships = [{ name: " B-CUBE ", year: "2019", semester: "20" }];
+    const { callback } = await oauthLogin(idpClaims(`case-${uid()}@ajou.ac.kr`, { sohakoe_memberships }));
     expect(location(callback)).toBe("/");
   });
 
-  it("관리자 예외: ADMIN_EMAILS는 도메인 검사를 면제한다", async () => {
-    const fetcher = workerWith({ ADMIN_EMAILS: "boss@gmail.com" });
-    const { callback } = await oauthLogin(googleClaims("boss@gmail.com", { hd: undefined }), { fetcher });
+  it("REQUIRED_SOHAKOE 설정을 바꿀 수 있다", async () => {
+    const fetcher = workerWith({ REQUIRED_SOHAKOE: "다른학회" });
+    const claims = idpClaims(`cfg-${uid()}@ajou.ac.kr`, { sohakoe_memberships: [{ name: "다른학회" }] });
+    expect(location((await oauthLogin(claims, { fetcher })).callback)).toBe("/");
+  });
+
+  it("ADMIN_EMAILS는 소학회 검사를 면제한다", async () => {
+    const email = `boss-${uid()}@ajou.ac.kr`;
+    const fetcher = workerWith({ ADMIN_EMAILS: email });
+    const { callback } = await oauthLogin(idpClaims(email, { sohakoe_memberships: [] }), { fetcher });
     expect(location(callback)).toBe("/");
-    const logs = await auditFor({ action: "auth.login", targetEmail: "boss@gmail.com" });
+    const logs = await auditFor({ action: "auth.login", targetEmail: email });
     expect(logs.at(-1)?.actor_role).toBe("admin");
-  });
-
-  it("REQUIRE_HD=true이고 hd가 일치하면 허용", async () => {
-    const fetcher = workerWith({ REQUIRE_HD: "true" });
-    const { callback } = await oauthLogin(googleClaims(`hd-${uid()}@ajou.ac.kr`), { fetcher });
-    expect(location(callback)).toBe("/");
   });
 });
 
@@ -235,47 +278,67 @@ describe("GET /auth/callback — 거부", () => {
   }
 
   it("다른 도메인", async () => {
-    await expectDenied(googleClaims(`x-${uid()}@gmail.com`, { hd: undefined }), "domain_not_allowed");
+    await expectDenied(idpClaims(`x-${uid()}@gmail.com`), "domain_not_allowed");
   });
 
   it("도메인을 접미사로 흉내 낸 주소 (evil-ajou.ac.kr)", async () => {
-    await expectDenied(googleClaims(`x-${uid()}@evil-ajou.ac.kr`), "domain_not_allowed");
+    await expectDenied(idpClaims(`x-${uid()}@evil-ajou.ac.kr`), "domain_not_allowed");
   });
 
   it("email_verified=false", async () => {
-    await expectDenied(googleClaims(`nv-${uid()}@ajou.ac.kr`, { email_verified: false }), "email_unverified");
+    await expectDenied(idpClaims(`nv-${uid()}@ajou.ac.kr`, { email_verified: false }), "email_unverified");
   });
 
   it("email_verified가 문자열 \"true\"여도 미인증으로 취급", async () => {
-    await expectDenied(googleClaims(`sv-${uid()}@ajou.ac.kr`, { email_verified: "true" }), "email_unverified");
+    await expectDenied(idpClaims(`sv-${uid()}@ajou.ac.kr`, { email_verified: "true" }), "email_unverified");
   });
 
   it("관리자도 email_verified는 필요하다", async () => {
-    const fetcher = workerWith({ ADMIN_EMAILS: "boss2@gmail.com" });
-    await expectDenied(googleClaims("boss2@gmail.com", { email_verified: false }), "email_unverified", fetcher);
+    const email = `boss2-${uid()}@ajou.ac.kr`;
+    const fetcher = workerWith({ ADMIN_EMAILS: email });
+    await expectDenied(idpClaims(email, { email_verified: false }), "email_unverified", fetcher);
   });
 
-  it("REQUIRE_HD=true인데 hd 없음", async () => {
-    const fetcher = workerWith({ REQUIRE_HD: "true" });
-    await expectDenied(googleClaims(`nohd-${uid()}@ajou.ac.kr`, { hd: undefined }), "hd_mismatch", fetcher);
+  it("관리자도 허용 도메인이어야 한다", async () => {
+    const fetcher = workerWith({ ADMIN_EMAILS: "boss3@gmail.com" });
+    await expectDenied(idpClaims("boss3@gmail.com"), "domain_not_allowed", fetcher);
+  });
+
+  it("소학회 이력 없음, 다른 소학회, 클레임 없음", async () => {
+    for (const sohakoe_memberships of [[], [{ name: "B-Cube2" }], undefined]) {
+      await expectDenied(idpClaims(`nosh-${uid()}@ajou.ac.kr`, { sohakoe_memberships }), "sohakoe_required");
+    }
+  });
+
+  it("거부된 사용자는 저장하지 않는다", async () => {
+    const email = `nosave-${uid()}@ajou.ac.kr`;
+    await expectDenied(idpClaims(email, { sohakoe_memberships: [] }), "sohakoe_required");
+    expect(await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(email).first()).toBeNull();
+  });
+
+  it("차단된 사용자는 email이 바뀌어도 sub로 거부한다", async () => {
+    const id = uid();
+    const email = `ban-sub-${id}@ajou.ac.kr`;
+    await createUser(email, { banned: true });
+    await expectDenied(idpClaims(`other-${id}@ajou.ac.kr`, { sub: `sub-${email}` }), "banned");
   });
 
   it("차단된 사용자", async () => {
     const email = `ban-${uid()}@ajou.ac.kr`;
     await createUser(email, { banned: true });
-    await expectDenied(googleClaims(email), "banned");
+    await expectDenied(idpClaims(email), "banned");
   });
 });
 
 describe("GET /auth/callback — OAuth 흐름 오류", () => {
   it("state 불일치 → oauth_state, 코드 교환 안 함", async () => {
-    const { callback } = await oauthLogin(googleClaims(`s-${uid()}@ajou.ac.kr`), { tamperState: true });
+    const { callback } = await oauthLogin(idpClaims(`s-${uid()}@ajou.ac.kr`), { tamperState: true });
     expect(location(callback)).toBe("/login?error=oauth_state");
     expect(tokenRequests).toHaveLength(0);
   });
 
   it("OAuth 쿠키 없음 → oauth_state", async () => {
-    const { callback } = await oauthLogin(googleClaims(`c-${uid()}@ajou.ac.kr`), { dropCookie: true });
+    const { callback } = await oauthLogin(idpClaims(`c-${uid()}@ajou.ac.kr`), { dropCookie: true });
     expect(location(callback)).toBe("/login?error=oauth_state");
     expect(tokenRequests).toHaveLength(0);
   });
@@ -285,15 +348,33 @@ describe("GET /auth/callback — OAuth 흐름 오류", () => {
     expect(location(res)).toBe("/login?error=oauth_cancelled");
   });
 
+  it("동의 중 SP 중지 (error=unauthorized_client) → oauth_client_suspended", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/auth/callback?error=unauthorized_client&state=x`, { redirect: "manual" });
+    expect(location(res)).toBe("/login?error=oauth_client_suspended");
+  });
+
+  it("요청 구성 오류 (error=invalid_scope) → oauth_failed", async () => {
+    const res = await SELF.fetch(`${ORIGIN}/auth/callback?error=invalid_scope&state=x`, { redirect: "manual" });
+    expect(location(res)).toBe("/login?error=oauth_failed");
+  });
+
+  for (const [title, iss] of [["다름", "https://evil.example.com"], ["없음", null]] as const) {
+    it(`인가 응답 iss ${title} → oauth_failed, 코드 교환 안 함`, async () => {
+      const { callback } = await oauthLogin(idpClaims(`iss-${uid()}@ajou.ac.kr`), { iss });
+      expect(location(callback)).toBe("/login?error=oauth_failed");
+      expect(tokenRequests).toHaveLength(0);
+    });
+  }
+
   it("코드 교환 실패 → oauth_failed", async () => {
     const { callback } = await oauthLogin(null);
     expect(location(callback)).toBe("/login?error=oauth_failed");
   });
 
   const invalidTokens: Array<[string, (email: string) => (nonce: string) => JWTPayload]> = [
-    ["nonce 불일치", (e) => googleClaims(e, { nonce: "other-nonce" })],
-    ["aud가 다른 클라이언트", (e) => googleClaims(e, { aud: "someone-else" })],
-    ["iss가 Google이 아님", (e) => googleClaims(e, { iss: "https://evil.example.com" })],
+    ["nonce 불일치", (e) => idpClaims(e, { nonce: "other-nonce" })],
+    ["aud가 다른 클라이언트", (e) => idpClaims(e, { aud: "someone-else" })],
+    ["iss가 IdP가 아님", (e) => idpClaims(e, { iss: "https://evil.example.com" })],
   ];
   for (const [title, claims] of invalidTokens) {
     it(`${title} → oauth_failed, 세션 없음`, async () => {
@@ -307,14 +388,21 @@ describe("GET /auth/callback — OAuth 흐름 오류", () => {
 
   it("만료된 id_token → oauth_failed", async () => {
     signOverride = (payload) => signIdToken({ ...payload }, { expiresIn: "-1m" });
-    const { callback } = await oauthLogin(googleClaims(`exp-${uid()}@ajou.ac.kr`));
+    const { callback } = await oauthLogin(idpClaims(`exp-${uid()}@ajou.ac.kr`));
     expect(location(callback)).toBe("/login?error=oauth_failed");
   });
 
   it("다른 키로 서명한 id_token → oauth_failed", async () => {
-    const other = await generateKeyPair("RS256");
+    const other = await generateKeyPair("ES256");
     signOverride = (payload) => signIdToken(payload, { key: other.privateKey });
-    const { callback } = await oauthLogin(googleClaims(`key-${uid()}@ajou.ac.kr`));
+    const { callback } = await oauthLogin(idpClaims(`key-${uid()}@ajou.ac.kr`));
+    expect(location(callback)).toBe("/login?error=oauth_failed");
+  });
+
+  it("ES256이 아닌 알고리즘(RS256) → oauth_failed", async () => {
+    const rsa = await generateKeyPair("RS256");
+    signOverride = (payload) => signIdToken(payload, { key: rsa.privateKey, alg: "RS256" });
+    const { callback } = await oauthLogin(idpClaims(`alg-${uid()}@ajou.ac.kr`));
     expect(location(callback)).toBe("/login?error=oauth_failed");
   });
 });
@@ -325,17 +413,16 @@ describe("evaluateLogin (허용 규칙 순수 함수)", () => {
     sub: "s",
     email,
     emailVerified: true,
-    hd: "ajou.ac.kr",
+    sohakoeMemberships: [{ name: "B-Cube" }],
     ...extra,
   });
 
-  it("규칙 순서: 미인증 → 도메인 → hd → 차단", () => {
-    const hdConfig = parseConfig({ ...env, REQUIRE_HD: "true" } as unknown as Env);
+  it("규칙 순서: 미인증 → 도메인 → 소학회 → 차단", () => {
     expect(evaluateLogin(base, id("a@gmail.com", { emailVerified: false }), null)).toEqual({ ok: false, reason: "email_unverified" });
     expect(evaluateLogin(base, id("a@gmail.com"), null)).toEqual({ ok: false, reason: "domain_not_allowed" });
-    expect(evaluateLogin(hdConfig, id("a@ajou.ac.kr", { hd: "gmail.com" }), null)).toEqual({ ok: false, reason: "hd_mismatch" });
+    expect(evaluateLogin(base, id("a@ajou.ac.kr", { sohakoeMemberships: [] }), { banned_at: 1 })).toEqual({ ok: false, reason: "sohakoe_required" });
     expect(evaluateLogin(base, id("a@ajou.ac.kr"), { banned_at: 1 })).toEqual({ ok: false, reason: "banned" });
-    expect(evaluateLogin(base, id("a@ajou.ac.kr", { hd: undefined }), null)).toEqual({ ok: true });
+    expect(evaluateLogin(base, id("a@ajou.ac.kr"), null)).toEqual({ ok: true });
   });
 
   it("차단은 관리자 예외보다 우선한다", () => {
@@ -369,7 +456,8 @@ describe("보안 헤더", () => {
     for (const path of ["/api/health", "/api/me", "/api/does-not-exist"]) {
       const res = await SELF.fetch(`${ORIGIN}${path}`);
       expect(res.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
-      expect(res.headers.get("Content-Security-Policy")).toContain("form-action 'self' https://accounts.google.com");
+      expect(res.headers.get("Content-Security-Policy")).toContain("form-action 'self'");
+      expect(res.headers.get("Content-Security-Policy")).not.toContain("google");
       expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
       expect(res.headers.get("Referrer-Policy")).toBe("strict-origin-when-cross-origin");
       expect(res.headers.get("X-Frame-Options")).toBe("DENY");
@@ -421,7 +509,7 @@ describe("개발 기능 차단", () => {
     if (!exists) await createUser(email, { banned: true });
 
     const dev = await fetcher(new Request(`${ORIGIN}/auth/dev-login?as=banned`, { redirect: "manual" }));
-    const real = (await oauthLogin(googleClaims(email), { fetcher })).callback;
+    const real = (await oauthLogin(idpClaims(email), { fetcher })).callback;
     for (const res of [dev, real]) {
       expect(res.status).toBe(302);
       expect(location(res)).toBe("/login?error=banned");
@@ -447,15 +535,15 @@ describe("개발 기능 차단", () => {
     expect(logs.at(-1)?.detail).toEqual({ dev: true });
   });
 
-  it("/auth/debug (DEV_AUTH_DEBUG=true): 마지막 로그인의 email, email_verified, hd 표시", async () => {
+  it("/auth/debug (DEV_AUTH_DEBUG=true): 마지막 로그인의 email, email_verified, 소학회 표시", async () => {
     const fetcher = workerWith({ DEV_AUTH_DEBUG: "true" });
     const email = `dbg-${uid()}@ajou.ac.kr`;
-    await oauthLogin(googleClaims(email), { fetcher });
+    await oauthLogin(idpClaims(email), { fetcher });
     const res = await fetcher(new Request(`${ORIGIN}/auth/debug`));
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain(email);
     expect(html).toContain("<code>true</code>");
-    expect(html).toContain("<code>ajou.ac.kr</code>");
+    expect(html).toContain("<code>B-Cube</code>");
   });
 });

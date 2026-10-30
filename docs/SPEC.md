@@ -19,7 +19,7 @@
 
 ## 1. 개요
 
-아주대 동아리 B-CUBE 회원(@ajou.ac.kr Google 계정)이 웹 콘솔에서 `<name>.b-cube.kr` 서브도메인을 대여한다. 대여한 서브도메인은 Vercel, AWS(IP) 등에 연결한다.
+아주대 동아리 B-CUBE 회원(@ajou.ac.kr 계정)이 웹 콘솔에서 `<name>.b-cube.kr` 서브도메인을 대여한다. 대여한 서브도메인은 Vercel, AWS(IP) 등에 연결한다.
 
 - DNS: Cloudflare (b-cube.kr 존, 네임서버가 Cloudflare)
 - 전체 앱: Cloudflare Workers 하나 (API + 정적 프론트 + Cron)
@@ -57,7 +57,7 @@
 ├─ worker/
 │  ├─ index.ts              # Hono 앱 + scheduled 핸들러
 │  ├─ env.ts                # Env 타입, 설정 파싱
-│  ├─ auth/                 # google oauth, session, csrf
+│  ├─ auth/                 # IdP(OIDC), session, csrf
 │  ├─ middleware/           # requireUser, requireAdmin, csrf, securityHeaders
 │  ├─ routes/               # auth, me, leases, admin, dev(개발 모드에서만 등록)
 │  ├─ services/
@@ -93,9 +93,10 @@
     "APP_ORIGIN": "https://domain.b-cube.kr",
     "ZONE_NAME": "b-cube.kr",
     "CF_ZONE_ID": "<사용자 제공>",
-    "GOOGLE_CLIENT_ID": "<사용자 제공>",
+    "IDP_ISSUER": "https://id.b-cube.kr",
+    "IDP_CLIENT_ID": "dyn-f6c226535e6a490f8ff1",
     "ALLOWED_EMAIL_DOMAIN": "ajou.ac.kr",
-    "REQUIRE_HD": "false",
+    "REQUIRED_SOHAKOE": "B-cube",
     "ADMIN_EMAILS": "",
     "MAX_LEASES_PER_USER": "3",
     "LEASE_DAYS": "180",
@@ -111,10 +112,10 @@
 }
 ```
 
-- **시크릿** (`wrangler secret put`, 로컬은 `.dev.vars`): `GOOGLE_CLIENT_SECRET`, `CF_API_TOKEN`
+- **시크릿** (`wrangler secret put`, 로컬은 `.dev.vars`): `IDP_CLIENT_SECRET`, `CF_API_TOKEN`
 - `env.ts`에서 모든 설정을 파싱하고 검증한다. 필수값이 없으면 기동 시 명확한 에러를 낸다.
   - 단, **개발 모드**(APP_ORIGIN이 `http://localhost:*`)에서는 필수 조건을 완화한다.
-    - `DEV_FAKE_LOGIN=true`이면 `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`이 비어 있어도 기동한다. 이때 `/auth/login`은 "OAuth 미설정 — 개발용 로그인을 사용하세요"라고 안내하는 화면을 보여준다.
+    - `DEV_FAKE_LOGIN=true`이면 `IDP_CLIENT_ID`/`IDP_CLIENT_SECRET`이 비어 있어도 기동한다. 이때 `/auth/login`은 "OAuth 미설정 — 개발용 로그인을 사용하세요"라고 안내하는 화면을 보여준다.
     - `DNS_DRY_RUN=true`이면 `CF_API_TOKEN`/`CF_ZONE_ID`가 비어 있어도 기동한다.
   - **안전장치**: APP_ORIGIN이 localhost가 아닌데 `DEV_FAKE_LOGIN`, `DEV_AUTH_DEBUG`, `DNS_DRY_RUN` 중 하나라도 true이면 **모든 요청에 500을 반환**하고 원인을 로그에 남긴다. 운영 배포 실수를 막기 위해서다.
 - `ADMIN_EMAILS`는 쉼표로 구분하며, 비교할 때 trim + 소문자로 정규화한다.
@@ -138,7 +139,7 @@
 
 ### 4.2 개발 전용 가짜 로그인 (`DEV_FAKE_LOGIN`)
 
-Google OAuth 설정 없이 모든 화면과 권한 시나리오를 확인하기 위한 기능이다.
+IdP 클라이언트 없이 모든 화면과 권한 시나리오를 확인하기 위한 기능이다.
 
 - **활성 조건**: `DEV_FAKE_LOGIN=true` **이고** APP_ORIGIN이 `http://localhost:*`일 때만 라우트를 **등록**한다. 조건을 만족하지 않으면 라우트 자체가 존재하지 않아 404가 난다. §4의 안전장치와 이중으로 막는다.
 - `GET /auth/dev-login?as=<persona>`: 시드 사용자로 즉시 세션을 만들고 `/`로 리다이렉트한다. 세션 생성 경로는 실제 OAuth 콜백과 **같은 함수**를 재사용한다(쿠키 속성, 감사 로그 `auth.login`, detail에 `{ "dev": true }` 표시).
@@ -186,15 +187,17 @@ npm run db:reset
 npm run dev                      # → http://localhost:5173
 ```
 
-`.dev.vars.example`의 기본값은 위 절차가 **OAuth 클라이언트나 Cloudflare 토큰 없이** 바로 동작하도록 정한다. 실제 Google 로그인을 시험할 때만 `GOOGLE_CLIENT_ID`/`SECRET`을 채운다.
+`.dev.vars.example`의 기본값은 위 절차가 **OAuth 클라이언트나 Cloudflare 토큰 없이** 바로 동작하도록 정한다. 실제 IdP 로그인을 시험할 때만 `IDP_CLIENT_ID`/`IDP_CLIENT_SECRET`을 채운다.
 
 ## 5. 데이터 모델 (`migrations/0001_init.sql`)
 
 ```sql
 CREATE TABLE users (
   email          TEXT PRIMARY KEY,          -- 소문자 정규화
-  google_sub     TEXT NOT NULL UNIQUE,
+  idp_sub        TEXT NOT NULL UNIQUE,      -- IdP sub (Google sub와 같은 값, 0005에서 google_sub를 이름 변경)
   name           TEXT,
+  student_id     TEXT,                      -- 학번 (0005 추가)
+  sohakoe_memberships TEXT,                 -- 소학회 이력 JSON 배열 (0005 추가)
   first_login_at INTEGER NOT NULL,          -- unix ms
   last_login_at  INTEGER NOT NULL,
   banned_at      INTEGER,
@@ -281,27 +284,30 @@ CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
 
 ## 6. 인증 및 세션
 
-### 6.1 Google OAuth (Authorization Code + PKCE)
+### 6.1 B-CUBE IdP 로그인 (OpenID Connect, Authorization Code + PKCE)
 
 - `GET /auth/login`
   - `state`, `nonce`, `code_verifier`를 생성한다.
-  - 이 값들을 `__Host-bcd_oauth` 쿠키에 담는다. 쿠키는 HttpOnly, Secure, SameSite=Lax, Path=/, Max-Age 600이다. 서명하거나 암호화하거나 D1에 저장해도 된다.
-  - 다음 주소로 리다이렉트한다: `https://accounts.google.com/o/oauth2/v2/auth`
-  - 파라미터: `scope=openid email profile`, `hd=<ALLOWED_EMAIL_DOMAIN>`(UI 힌트일 뿐, 검증 아님), `prompt=select_account`
+  - 이 값들을 `__Host-bcd_oauth` 쿠키에 담는다. 쿠키는 HttpOnly, Secure, SameSite=Lax, Path=/, Max-Age 600이다. 콜백에서 한 번 쓰고 지운다.
+  - 다음 주소로 리다이렉트한다: `${IDP_ISSUER}/authorize`
+  - 파라미터: `response_type=code`, `scope=openid email profile student sohakoe`, `code_challenge_method=S256`
 - `GET /auth/callback`
-  1. `state`가 일치하는지 확인하고, 코드를 토큰으로 교환한다(`code_verifier` 포함).
-  2. `id_token`을 `jose`와 Google JWKS(`https://www.googleapis.com/oauth2/v3/certs`)로 검증한다.
-     - `iss`가 `https://accounts.google.com` 또는 `accounts.google.com`인지
-     - `aud`가 `GOOGLE_CLIENT_ID`인지
+  1. `error` 쿼리가 있으면 처리한다: `access_denied`는 취소 안내, `unauthorized_client`는 운영진 문의 안내, 그 외는 로그에 남기고 일반 오류를 표시한다.
+  2. `state`와 `iss`(RFC 9207, `IDP_ISSUER`와 같아야 함)를 확인하고, 코드를 토큰으로 교환한다(`code_verifier` 포함, 클라이언트 인증은 `client_secret_basic`).
+  3. `id_token`을 `jose`와 IdP JWKS(`${IDP_ISSUER}/jwks.json`)로 검증한다.
+     - 서명 알고리즘은 ES256만 허용한다.
+     - `iss`가 `IDP_ISSUER`인지, `aud`가 `IDP_CLIENT_ID`인지
      - `exp`가 유효한지, `nonce`가 일치하는지
-  3. **허용 규칙**
-     - `email_verified === true`이고 이메일(소문자)이 `@${ALLOWED_EMAIL_DOMAIN}`로 끝나야 한다.
-     - `REQUIRE_HD=true`이면 `hd === ALLOWED_EMAIL_DOMAIN`도 만족해야 한다.
-     - **예외**: `ADMIN_EMAILS`에 있는 이메일은 `email_verified`만 확인하고 도메인 검사를 면제한다.
+  4. **허용 규칙**
+     - `email_verified === true`이고 이메일(소문자)이 `@${ALLOWED_EMAIL_DOMAIN}`로 끝나야 한다. 관리자도 예외가 없다. IdP가 이미 학교 계정만 통과시키므로 방어용 검사다.
+     - `sohakoe_memberships`에 이름이 `REQUIRED_SOHAKOE`와 같은 항목(대소문자 무시, 앞뒤 공백 제거)이 있어야 한다. 기간은 보지 않으며 이력이 하나라도 있으면 허용한다.
+     - **예외**: `ADMIN_EMAILS`에 있는 이메일은 소학회 검사를 면제한다.
      - `users.banned_at`이 설정된 사용자는 거부한다.
      - 거부할 때는 `auth.login_denied`를 감사 로그에 남기고, 로그인 페이지에 사유를 표시한다.
-  4. users를 upsert하고 세션을 생성한 뒤 `/`로 리다이렉트한다.
-- `DEV_AUTH_DEBUG=true`이고 `APP_ORIGIN`이 localhost일 때만 `/auth/debug` 페이지를 연다. 이 페이지는 마지막 로그인의 ID 토큰 클레임(`email`, `email_verified`, `hd`)을 보여준다. 운영에서는 라우트 자체를 등록하지 않는다.
+  5. 사용자를 찾는다. `idp_sub`가 일치하는 사용자를 먼저 찾고, 없을 때만 email로 기존 계정을 잇는다. sub로 찾은 계정은 토큰의 email이 달라도 같은 계정이다.
+  6. users를 upsert(`idp_sub`, `name`, `student_id`, `sohakoe_memberships`)하고 세션을 생성한 뒤 `/`로 리다이렉트한다. 학적 정보는 학번과 소학회 이력만 저장한다.
+- 로그아웃은 이 서비스의 세션만 끊는다. IdP에는 로그아웃 엔드포인트와 세션이 없다.
+- `DEV_AUTH_DEBUG=true`이고 `APP_ORIGIN`이 localhost일 때만 `/auth/debug` 페이지를 연다. 이 페이지는 마지막 로그인의 ID 토큰 클레임(`email`, `email_verified`, 소학회 이름)을 보여준다. 운영에서는 라우트 자체를 등록하지 않는다.
 
 ### 6.2 세션 쿠키 (쿠키 공유 리스크 대응)
 
@@ -322,7 +328,7 @@ CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
 
 ### 6.4 보안 헤더 (모든 응답)
 
-- `Content-Security-Policy`: `default-src 'self'; img-src 'self' data: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com`
+- `Content-Security-Policy`: `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
   - Carbon은 셀프 호스팅, 폰트는 jsDelivr CDN(`cdn.jsdelivr.net`)에서 불러오는 기준이다. 필요하면 조정하고 보고한다.
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 - API 응답에는 `Cache-Control: no-store`를 붙인다.
@@ -422,7 +428,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 ### 인증
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/auth/login` | Google 로그인 시작 |
+| GET | `/auth/login` | IdP 로그인 시작 |
 | GET | `/auth/callback` | 콜백 |
 | POST | `/auth/logout` | 로그아웃 (CSRF 적용) |
 
@@ -514,7 +520,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 - 모바일 폭에서도 사용 가능해야 한다.
 
 ### 페이지
-1. **로그인** (`/login`): `Tile`과 안내 문구("@ajou.ac.kr 계정만 이용 가능"), `Button` "Google로 로그인". 거부 사유는 `InlineNotification`으로 표시.
+1. **로그인** (`/login`): `Tile`과 안내 문구("B-CUBE 소학회 회원의 @ajou.ac.kr 계정만 이용 가능"), `Button` "B-CUBE 계정으로 로그인". 거부 사유는 `InlineNotification`으로 표시.
 2. **내 서브도메인** (`/`)
    - `DataTable` 컬럼: 이름(링크), 연결 대상, 상태(`Tag`: active=green, suspended=red, expired=gray), 만료일, 마지막 헬스체크, 작업(`OverflowMenu`: 편집/연장/재확인/반납)
    - 상단 `Button` "새 서브도메인". 한도에 도달하면 비활성화하고 사유를 툴팁으로 보여준다.
@@ -541,8 +547,8 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 - **단위**: `shared/rules.ts`의 모든 규칙
   - 이름 정규식, 예약어, 금칙어, IP 사설 대역 경계값, CNAME 정규화와 금지 대상, 레코드 구성 조합, Vercel TXT 값 형식
 - **테스트 환경**: `vitest.config.ts`를 `vite.config.ts`와 분리한다(`cloudflare()` 플러그인 충돌 방지). Workers 런타임 테스트 패키지는 `@cloudflare/vitest-pool-workers`의 후속인 `@cloudflare/vitest-plugin`을 쓴다. 바인딩은 개인 `.dev.vars`와 무관하게 설정 파일에 고정하고, 각 테스트 파일 실행 전에 D1 마이그레이션을 적용한다.
-- **통합** (Workers 런타임, D1 로컬, Cloudflare/Google API는 fetch mock):
-  - 로그인 허용/거부(도메인, `email_verified`, hd, 관리자 예외, 차단 사용자)
+- **통합** (Workers 런타임, D1 로컬, Cloudflare API와 IdP는 fetch mock):
+  - 로그인 허용/거부(도메인, `email_verified`, 소학회 이력, 관리자 예외, 차단 사용자), IdP 응답 검증(state, iss, 서명, aud, exp, nonce, alg)
   - CSRF: Origin 누락, 다른 서브도메인 Origin, 토큰 불일치 → 403
   - 1인당 한도, 남의 lease 접근 → 404, 일반 사용자의 admin API 접근 → 403
   - lease 생성/교체/반납 시 Cloudflare 호출 순서와 롤백

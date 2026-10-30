@@ -13,12 +13,14 @@ export interface Config {
   zoneName: string;
   cfZoneId: string;
   cfApiToken: string;
-  googleClientId: string;
-  googleClientSecret: string;
-  /** Google OAuth 클라이언트가 설정되어 있는지. 개발 모드 + DEV_FAKE_LOGIN이면 false일 수 있다. */
+  idpIssuer: string;
+  idpClientId: string;
+  idpClientSecret: string;
+  /** IdP 클라이언트가 설정되어 있는지. 개발 모드 + DEV_FAKE_LOGIN이면 false일 수 있다. */
   oauthConfigured: boolean;
   allowedEmailDomain: string;
-  requireHd: boolean;
+  /** 로그인에 필요한 소학회 이름(소문자 정규화). ADMIN_EMAILS는 면제한다. */
+  requiredSohakoe: string;
   adminEmails: ReadonlySet<string>;
   maxLeasesPerUser: number;
   leaseDays: number;
@@ -106,12 +108,14 @@ export function parseConfig(env: AppEnv): Config {
     if (!appOrigin.startsWith("https://")) errors.push("운영 APP_ORIGIN은 https://로 시작해야 합니다");
   }
 
-  const googleClientId = str(raw.GOOGLE_CLIENT_ID);
-  const googleClientSecret = str(raw.GOOGLE_CLIENT_SECRET);
-  const oauthConfigured = googleClientId !== "" && googleClientSecret !== "";
+  const idpIssuer = str(raw.IDP_ISSUER).replace(/\/+$/, "");
+  const idpClientId = str(raw.IDP_CLIENT_ID);
+  const idpClientSecret = str(raw.IDP_CLIENT_SECRET);
+  const oauthConfigured = idpIssuer !== "" && idpClientId !== "" && idpClientSecret !== "";
   if (!oauthConfigured && !(isDev && devFakeLogin)) {
-    errors.push("GOOGLE_CLIENT_ID와 GOOGLE_CLIENT_SECRET이 필요합니다");
+    errors.push("IDP_ISSUER, IDP_CLIENT_ID, IDP_CLIENT_SECRET이 필요합니다");
   }
+  if (idpIssuer && !isDev && !idpIssuer.startsWith("https://")) errors.push("운영 IDP_ISSUER는 https://로 시작해야 합니다");
 
   const cfZoneId = str(raw.CF_ZONE_ID);
   const cfApiToken = str(raw.CF_API_TOKEN);
@@ -123,6 +127,8 @@ export function parseConfig(env: AppEnv): Config {
   if (!zoneName) errors.push("ZONE_NAME이 필요합니다");
   const allowedEmailDomain = str(raw.ALLOWED_EMAIL_DOMAIN).toLowerCase();
   if (!allowedEmailDomain) errors.push("ALLOWED_EMAIL_DOMAIN이 필요합니다");
+  const requiredSohakoe = str(raw.REQUIRED_SOHAKOE).toLowerCase();
+  if (!requiredSohakoe) errors.push("REQUIRED_SOHAKOE가 필요합니다");
 
   const adminEmails = new Set(splitList(raw.ADMIN_EMAILS));
   // 개발 모드의 admin 페르소나 자동 포함은 여기서만 처리한다. 권한 검사 코드에는 개발용 분기가 없다.
@@ -134,11 +140,12 @@ export function parseConfig(env: AppEnv): Config {
     zoneName,
     cfZoneId,
     cfApiToken,
-    googleClientId,
-    googleClientSecret,
+    idpIssuer,
+    idpClientId,
+    idpClientSecret,
     oauthConfigured,
     allowedEmailDomain,
-    requireHd: bool("REQUIRE_HD", raw.REQUIRE_HD, errors),
+    requiredSohakoe,
     adminEmails,
     maxLeasesPerUser: int("MAX_LEASES_PER_USER", raw.MAX_LEASES_PER_USER, errors),
     leaseDays: int("LEASE_DAYS", raw.LEASE_DAYS, errors),
