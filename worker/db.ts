@@ -87,7 +87,7 @@ export function isDuplicateKey(err: unknown): boolean {
   return err instanceof MongoServerError && err.code === 11000;
 }
 
-/** 컬렉션별 인덱스. `npm run db:migrate`가 적용한다. */
+/** 컬렉션별 인덱스. `pnpm run db:migrate`가 적용한다. */
 export const INDEXES: Record<string, IndexDescription[]> = {
   users: [
     { key: { email: 1 }, unique: true },

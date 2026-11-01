@@ -11,7 +11,7 @@
 
 1. **마일스톤 단위로 진행**하고, 각 마일스톤이 끝날 때마다 변경 요약과 다음 단계를 보고한 뒤 멈춘다.
 2. **운영 환경에 영향을 주는 명령은 실행 전에 반드시 사용자 확인을 받는다.**
-   - 대상: Netlify 운영 배포(`netlify deploy --prod`, 연결 브랜치 push), `npm run db:migrate:remote`, `.env`의 원격 DB에 대한 `db:seed`·`cron --remote`, `netlify env:set`, 실제 Cloudflare DNS API 호출
+   - 대상: Netlify 운영 배포(`netlify deploy --prod`, 연결 브랜치 push), `pnpm run db:migrate:remote`, `.env`의 원격 DB에 대한 `db:seed`·`cron --remote`, `netlify env:set`, 실제 Cloudflare DNS API 호출
 3. **시크릿을 코드, 커밋, 로그에 절대 남기지 않는다.** `.env`는 `.gitignore`에 넣고, `.env.example`만 커밋한다.
 4. **이 앱이 생성하지 않은 DNS 레코드는 절대 수정하거나 삭제하지 않는다.** 이 앱이 만들었다는 근거가 DB에 있는 레코드만 조작한다: `records.cf_record_id` 또는 DNS 작업 기록 `dns_ops.cf_ids`(§8). comment(`bcd:lease=`)만 같은 레코드는 근거가 아니다.
 5. 로컬 개발에서는 `DNS_DRY_RUN=true`가 기본값이다. 이 값이 true이면 Cloudflare API를 호출하지 않고 가짜 record id를 반환하며 로그만 남긴다.
@@ -38,6 +38,7 @@
 | 정적 서빙 | Netlify 정적 배포(`dist/`), SPA 폴백은 `public/_redirects` |
 | JWT 검증 | **`jose`** (`createRemoteJWKSet`) |
 | 입력 검증 | **`zod`** (서버/클라이언트 스키마 공유) |
+| 패키지 매니저 | **pnpm 12** (`package.json`의 `packageManager`, `pnpm-lock.yaml`). 잠금 파일은 하나만 둔다. Node는 **24** (`netlify.toml`) |
 | 테스트 | **Vitest** (Node, `mongodb-memory-server-core` 복제 세트) |
 | 폰트 | IBM Plex Sans KR |
 
@@ -89,7 +90,7 @@
 
 ## 4. 설정 (netlify.toml / 환경변수)
 
-- `netlify.toml`: 빌드 명령(`npm run build`), 배포 디렉터리(`dist`), Node 버전
+- `netlify.toml`: 빌드 명령(`pnpm run build`), 배포 디렉터리(`dist`), Node 버전
 - 함수 경로와 일정은 각 함수 파일의 `export const config`에 둔다(`path: ["/api/*", "/auth/*"]`, `schedule: "17 * * * *"` 등). Netlify가 정적으로 읽으므로 문자열 리터럴로 쓴다.
 - 비밀이 아닌 기본값은 `worker/runtime.ts`의 `DEFAULT_VARS`에 둔다. Netlify 환경 변수(운영)·`.env`(로컬)에 같은 이름이 있으면 그 값이 우선한다.
 
@@ -130,16 +131,16 @@ export const DEFAULT_VARS = {
 
 | 스크립트 | 동작 |
 |---|---|
-| `npm run dev` | `vite dev`: SPA(HMR) + 함수 코드를 `http://localhost:5173`에서 실행 |
-| `npm run build` | `vite build`: SPA 빌드(`dist/`). 함수는 Netlify가 배포 시 번들 |
-| `npm run preview` | `vite build && vite preview`: 빌드한 SPA + 함수 코드로 실행 |
-| `npm run db:migrate` | 로컬 DB 마이그레이션 |
-| `npm run db:migrate:remote` | 원격 DB에 인덱스 적용. **실행 전 사용자 확인 필수** |
-| `npm run db:seed` | 로컬 DB에 시드 데이터 투입 (§4.3) |
-| `npm run db:reset` | 로컬 DB 파일 삭제 → 마이그레이션 → 시드 (원클릭 초기화) |
-| `npm run cron -- <job>` | 예약 작업(`health`, `daily`, `drift`)을 로컬 DB로 1회 실행 |
-| `npm run typecheck` | `tsc --noEmit`를 app(`src`, `shared`), worker(`worker`, `shared`, `test`, `netlify`, `scripts`), node(설정 파일) tsconfig 3개에 각각 실행 |
-| `npm test` | Vitest 전체 실행 |
+| `pnpm run dev` | `vite dev`: SPA(HMR) + 함수 코드를 `http://localhost:5173`에서 실행 |
+| `pnpm run build` | `vite build`: SPA 빌드(`dist/`). 함수는 Netlify가 배포 시 번들 |
+| `pnpm run preview` | `vite build && vite preview`: 빌드한 SPA + 함수 코드로 실행 |
+| `pnpm run db:migrate` | 로컬 DB 마이그레이션 |
+| `pnpm run db:migrate:remote` | 원격 DB에 인덱스 적용. **실행 전 사용자 확인 필수** |
+| `pnpm run db:seed` | 로컬 DB에 시드 데이터 투입 (§4.3) |
+| `pnpm run db:reset` | 로컬 DB 파일 삭제 → 마이그레이션 → 시드 (원클릭 초기화) |
+| `pnpm run cron <job>` | 예약 작업(`health`, `daily`, `drift`)을 로컬 DB로 1회 실행 |
+| `pnpm run typecheck` | `tsc --noEmit`를 app(`src`, `shared`), worker(`worker`, `shared`, `test`, `netlify`, `scripts`), node(설정 파일) tsconfig 3개에 각각 실행 |
+| `pnpm test` | Vitest 전체 실행 |
 
 - 배포는 Netlify(연결 브랜치 push 또는 `netlify deploy --build --prod`)로 한다. **실행 전 사용자 확인 필수**
 - `db:seed`, `db:reset`, `cron`은 **로컬 파일 DB에만 작동**해야 한다. 원격으로 시드를 넣는 스크립트는 만들지 않는다.
@@ -166,7 +167,7 @@ IdP 클라이언트 없이 모든 화면과 권한 시나리오를 확인하기 
 
 ### 4.3 시드 데이터 (`scripts/seed.sql` 또는 `scripts/seed.ts`)
 
-`npm run db:seed`가 **멱등적으로**(다시 실행해도 같은 결과) 다음 데이터를 넣는다. 시간 값은 실행 시각 기준 상대값으로 계산한다. SQL 파일이라면 생성 스크립트로 만든다.
+`pnpm run db:seed`가 **멱등적으로**(다시 실행해도 같은 결과) 다음 데이터를 넣는다. 시간 값은 실행 시각 기준 상대값으로 계산한다. SQL 파일이라면 생성 스크립트로 만든다.
 
 - **사용자**: §4.2의 페르소나 5명. `banned`는 `banned_at`과 `ban_reason`을 설정한다.
 - **lease** (모든 `cf_record_id`는 `dry_` 접두사):
@@ -189,9 +190,9 @@ IdP 클라이언트 없이 모든 화면과 권한 시나리오를 확인하기 
 
 ```bash
 cp .env.example .env             # 기본값: DEV_FAKE_LOGIN=true, DNS_DRY_RUN=true, 시크릿 비움. `DB_*`는 채운다
-npm install
-npm run db:reset
-npm run dev                      # → http://localhost:5173
+pnpm install
+pnpm run db:reset
+pnpm run dev                      # → http://localhost:5173
 ```
 
 `.env.example`의 기본값은 위 절차가 **OAuth 클라이언트나 Cloudflare 토큰 없이** 바로 동작하도록 정한다. 실제 IdP 로그인을 시험할 때만 `IDP_CLIENT_SECRET`을 채운다.
@@ -583,7 +584,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 
 | # | 내용 | 완료 기준 |
 |---|---|---|
-| M1 | 프로젝트 골격: Vite + Hono + React/Carbon, Netlify 설정(2026-11-01 이전, 당시는 Cloudflare 플러그인 + wrangler.jsonc), `.env.example`, DB 마이그레이션, env 파싱(개발 모드 완화 + 안전장치), npm 스크립트(§4.1), 세션 기반 + **개발 전용 가짜 로그인**(§4.2), **시드 스크립트**(§4.3), DEV/DRY-RUN 배지 | **OAuth 클라이언트와 Cloudflare 토큰이 없는 상태에서** §4.4 절차만으로 `npm run dev` → 로그인 화면의 페르소나 버튼으로 로그인 → Carbon 셸(Header, 배지, 로그아웃)과 `/api/health`, `/api/me` 응답 확인. `npm run preview`도 같은 방식으로 동작 |
+| M1 | 프로젝트 골격: Vite + Hono + React/Carbon, Netlify 설정(2026-11-01 이전, 당시는 Cloudflare 플러그인 + wrangler.jsonc), `.env.example`, DB 마이그레이션, env 파싱(개발 모드 완화 + 안전장치), npm 스크립트(§4.1), 세션 기반 + **개발 전용 가짜 로그인**(§4.2), **시드 스크립트**(§4.3), DEV/DRY-RUN 배지 | **OAuth 클라이언트와 Cloudflare 토큰이 없는 상태에서** §4.4 절차만으로 `pnpm run dev` → 로그인 화면의 페르소나 버튼으로 로그인 → Carbon 셸(Header, 배지, 로그아웃)과 `/api/health`, `/api/me` 응답 확인. `pnpm run preview`도 같은 방식으로 동작 |
 | M2 | Google OAuth, CSRF, 보안 헤더, `/auth/debug`(개발 전용). 가짜 로그인과 세션 생성 함수 공유 | 로컬 로그인 성공/거부 테스트 통과, 개발 기능 차단 테스트 통과 |
 | M3 | `shared/rules.ts` + 단위 테스트 | 규칙 테스트 전부 통과 |
 | M4 | Cloudflare DNS 서비스(dry-run) + lease API + 감사 로그 | 통합 테스트 통과 |

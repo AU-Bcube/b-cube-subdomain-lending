@@ -66,7 +66,7 @@
 - [ ] 로컬 개발용: `cp .env.example .env`로 복사합니다. 기본값만으로 가짜 로그인 + dry-run이 동작합니다. `.gitignore`에 포함되어 있는지 확인하세요.
   - 실제 IdP 로그인을 시험할 때만 `IDP_CLIENT_SECRET`을 채웁니다.
   - `DNS_DRY_RUN=true`는 유지하고, 실제 DNS 변경 테스트는 마지막에만 합니다.
-- [ ] 로컬 UI 확인: `npm run db:reset` → `npm run dev` → `http://localhost:5173` 로그인 화면 하단의 페르소나 버튼(일반/한도 도달/신규/관리자/차단)으로 각 화면을 확인합니다.
+- [ ] 로컬 UI 확인: `pnpm run db:reset` → `pnpm run dev` → `http://localhost:5173` 로그인 화면 하단의 페르소나 버튼(일반/한도 도달/신규/관리자/차단)으로 각 화면을 확인합니다.
 - [ ] 운영용: 터미널에서 직접 실행합니다(README 배포 절차 4단계).
   ```bash
   netlify env:set IDP_CLIENT_SECRET "..." --secret

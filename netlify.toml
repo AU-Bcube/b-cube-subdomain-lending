@@ -2,9 +2,9 @@
 # 비밀이 아닌 기본값은 worker/runtime.ts DEFAULT_VARS에 있다.
 
 [build]
-  command = "npm run build"
+  command = "pnpm run build"
   publish = "dist"
 
 [build.environment]
-  NODE_VERSION = "22"
+  NODE_VERSION = "24"
 
