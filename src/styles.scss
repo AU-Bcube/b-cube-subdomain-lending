@@ -24,8 +24,21 @@ select {
   font-family: $font-sans;
 }
 
+// 앱 영역 밖(iOS 하단 영역, 스크롤 끝)에 흰 배경이 드러나지 않게 App.tsx의 테마 배경색(g10, g100)과 맞춘다.
+html,
+body {
+  background: #f4f4f4;
+
+  @media (prefers-color-scheme: dark) {
+    background: #161616;
+  }
+}
+
 .app-root {
+  // 본문의 margin-top이 밖으로 겹치면 앱 영역이 48px 밀려 짧은 페이지에도 스크롤이 생긴다.
+  display: flow-root;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--cds-background);
   color: var(--cds-text-primary);
 }
@@ -447,10 +460,11 @@ select {
   }
 
   .login-page {
-    padding: 1rem 0;
+    // 그리드 여백 1rem과 합쳐 박스와 화면 끝 사이가 1.5rem이 된다.
+    padding: 1rem 0.5rem;
 
     .login-tile {
-      padding: 1.25rem;
+      padding: 1.875rem;
     }
   }
 
