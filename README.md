@@ -4,6 +4,9 @@
 
 ### 소학회 공용 도메인(b-cube.kr)의 셀프 대여 서비스
 
+<img src="assets/b-cube-subdomain-lending-ko-logo.png" height="64" style="margin-right: 32;">
+<img src="assets/b-cube-subdomain-lending-en-logo.png" height="64">
+
 ![alt text](assets/cover.png)
 
 <!-- **{{주최 기관/협의체}}**
@@ -224,7 +227,7 @@ flowchart LR
 
 | # | 데이터 | 출처 | 용도 |
 |:---:|---|---|---|
-| ① | 대여·레코드·감사 로그 | 자체 DB (Cloudflare D1) | 소유자·기한·상태 관리, 한도·이름 보류 판단, 변경 이력 |
+| ① | 대여·레코드·감사 로그 | 자체 DB (MongoDB) | 소유자·기한·상태 관리, 한도·이름 보류 판단, 변경 이력 |
 | ② | 존의 DNS 레코드 | Cloudflare DNS API | 이름 충돌 검사, 레코드 생성·교체·삭제, 주간 드리프트 대조 |
 | ③ | 연결 대상 상태 | DoH(`cloudflare-dns.com`), 대상 HTTP 응답, TCP 연결 | 헬스체크 판정, 자동 일시 중지·재활성화 |
 
@@ -251,46 +254,48 @@ flowchart LR
     A["대상 확인<br/>DoH 조회 · HTTP GET · TCP 443/80"] --> B["판정<br/>벤더별 '사이트 없음' 시그니처"] --> C["서비스 활용<br/>실패 누적 → 일시 중지"]
 ```
 
-```sql
--- 대여와 레코드 (migrations/0001_init.sql 발췌)
-CREATE TABLE leases (
-  id                TEXT PRIMARY KEY,
-  name              TEXT NOT NULL,          -- 'alice' (존 이름 제외)
-  owner_email       TEXT NOT NULL REFERENCES users(email),
-  target_kind       TEXT NOT NULL,          -- 'vercel' | 'ip' | 'cname'
-  status            TEXT NOT NULL,          -- 'active' | 'suspended' | 'expired' | 'revoked' | 'released'
-  expires_at        INTEGER NOT NULL,
-  health_fail_count INTEGER NOT NULL DEFAULT 0
-  -- ...
-);
--- 같은 이름은 active/suspended 상태로 하나만 존재
-CREATE UNIQUE INDEX uq_leases_name_live ON leases(name) WHERE status IN ('active','suspended');
+```js
+// 대여와 레코드 (worker/db.ts, services/leases.ts 발췌)
+// leases 컬렉션
+{
+  id: "<uuid>",
+  name: "alice",                 // 존 이름 제외
+  owner_email: "a@ajou.ac.kr",
+  target_kind: "ip",             // 'vercel' | 'ip' | 'cname'
+  status: "active",              // 'active' | 'suspended' | 'expired' | 'revoked' | 'released'
+  expires_at: 1798761600000,
+  health_fail_count: 0,
+  // ...
+}
+// 같은 이름은 active/suspended 상태로 하나만 존재 (부분 유일 인덱스)
+{ key: { name: 1 }, unique: true, partialFilterExpression: { status: { $in: ["active", "suspended"] } } }
 
-CREATE TABLE records (
-  id           TEXT PRIMARY KEY,
-  lease_id     TEXT NOT NULL REFERENCES leases(id),
-  cf_record_id TEXT,                        -- 일시 중지 상태에서는 NULL
-  type         TEXT NOT NULL,               -- 'A' | 'AAAA' | 'CNAME' | 'TXT'
-  host         TEXT NOT NULL,
-  content      TEXT NOT NULL,
-  proxied      INTEGER NOT NULL DEFAULT 0
-  -- ...
-);
+// records 컬렉션
+{
+  id: "<uuid>",
+  lease_id: "<leases.id>",
+  cf_record_id: "<Cloudflare id>", // 일시 중지 상태에서는 null
+  type: "A",                       // 'A' | 'AAAA' | 'CNAME' | 'TXT'
+  host: "alice.b-cube.kr",
+  content: "203.0.113.10",
+  proxied: 1,
+  // ...
+}
 ```
 
 ---
 
 ## 3.2 시스템 구축
 
-API, 화면, 예약 작업(cron)을 Cloudflare Worker 하나로 운영해 별도 서버가 없다.
+화면은 Netlify 정적 배포, API와 예약 작업(cron)은 Netlify Functions로 운영해 별도 서버가 없다. `b-cube.kr` DNS 존은 계속 Cloudflare에 둔다.
 
 ### 시스템 아키텍처
 
 ```mermaid
 flowchart LR
     FE["React + IBM Carbon<br/>사용자·관리 화면"] -.- BE
-    subgraph Core["Cloudflare Worker (단일 배포)"]
-        BE["Hono<br/>API · 인증 · CSRF"] -.- RDB[("D1 (SQLite)<br/>대여·세션·감사 로그")]
+    subgraph Core["Netlify (Functions + 예약 함수)"]
+        BE["Hono<br/>API · 인증 · CSRF"] -.- RDB[("MongoDB<br/>대여·세션·감사 로그")]
         CRON["Cron 3종<br/>헬스체크 · 만료 · 드리프트"] -.- RDB
     end
     BE -.- IDP["B-CUBE IdP<br/>학교 계정, 소학회 확인"]
@@ -301,13 +306,13 @@ flowchart LR
 
 | 구성요소 | 기술 | 역할 |
 |---|---|---|
-| 런타임 | Cloudflare Workers | API, 정적 화면, cron을 하나의 배포 단위로 실행 |
+| 런타임 | Netlify Functions, 예약 함수 | API, 정적 화면, cron을 하나의 사이트로 배포 |
 | 백엔드 | Hono, zod | 라우팅, 입력 검증(서버·화면 공용 스키마) |
-| RDB | Cloudflare D1 | 사용자, 세션(해시 저장), 대여, 레코드, 감사 로그, 드리프트 결과 |
+| DB | MongoDB (Atlas) | 사용자, 세션(해시 저장), 대여, 레코드, 감사 로그, 드리프트 결과 |
 | DNS | Cloudflare DNS API | 레코드 생성·교체·삭제, comment 태그로 앱 관리 레코드 구분 |
 | 인증 | B-CUBE IdP(OIDC, PKCE), jose | ES256 ID 토큰 검증, `@ajou.ac.kr`과 소학회 회원 제한 |
 | 프론트엔드 | React, Vite, IBM Carbon | 목록·생성 4단계·상세·관리 4탭, 모바일 폭 지원 |
-| 상태 확인 | DoH, `cloudflare:sockets` | 헬스체크(CNAME 대상 조회, HTTP 응답, TCP 443/80) |
+| 상태 확인 | DoH, `node:net` | 헬스체크(CNAME 대상 조회, HTTP 응답, TCP 443/80) |
 
 #### 보안 설계
 
@@ -315,15 +320,17 @@ flowchart LR
 
 - **세션 쿠키**: `__Host-` 접두사로 `Domain` 속성을 막아, 형제 서브도메인이 쿠키를 덮어쓰지 못하게 한다.
 - **CSRF**: 상태를 바꾸는 모든 요청에 `Origin` 정확히 일치와 CSRF 토큰 일치를 둘 다 요구한다. SameSite 쿠키만으로는 같은 사이트의 서브도메인 요청을 막을 수 없기 때문이다.
+- **동의 관리**: 회원은 상단 메뉴의 "B-CUBE 통합 로그인 동의 관리"(`https://id.b-cube.kr/consents`)에서 이 서비스에 대한 제공 동의를 철회할 수 있다. 철회해도 이 서비스의 세션은 끊기지 않고 다음 로그인 때 동의 화면이 다시 나온다.
+- **탈퇴·삭제**: 회원은 직접 탈퇴하고 관리자는 회원 정보를 삭제할 수 있다. 남은 서브도메인의 DNS 레코드를 먼저 지우고 회원 정보를 삭제하며, 서브도메인 기록(DNS 레코드 내용 포함)과 감사 로그는 그대로 남긴다.
 - **권한 격리**: 회원은 자기 대여만 조회할 수 있고, 남의 대여 ID에는 404로 응답해 존재 여부도 숨긴다.
-- **검증**: 테스트 6개 파일 269건(규칙 단위 테스트, Workers 런타임 통합 테스트)으로 로그인 허용·거부, CSRF, 한도, Cloudflare 호출 순서와 롤백, 헬스체크·만료를 확인한다.
+- **검증**: 테스트 7개 파일 308건(규칙 단위 테스트, Node + 인메모리 MongoDB 통합 테스트)으로 로그인 허용·거부, CSRF, 한도, Cloudflare 호출 순서와 롤백, 헬스체크·만료를 확인한다.
 
 ### 국산 대체재 후보
 
 | 구분 | 현재 사용 | 국산 대체재 후보 |
 |---|---|---|
-| 서버리스 런타임 | Cloudflare Workers | 네이버클라우드 Cloud Functions |
-| 관계형 DB | Cloudflare D1 | 네이버클라우드 Cloud DB for MySQL, NHN Cloud RDS for MySQL |
+| 서버리스 런타임 | Netlify Functions | 네이버클라우드 Cloud Functions |
+| 문서 DB | MongoDB (Atlas) | 네이버클라우드 Cloud DB for MongoDB |
 | 권한 DNS | Cloudflare DNS | 네이버클라우드 Global DNS, NHN Cloud DNS Plus, 가비아 DNS |
 
 <!-- 대체재 제품명은 제출 전에 각 사 공식 페이지에서 현재 명칭을 확인할 것 -->
@@ -389,3 +396,16 @@ flowchart LR
 - Cloudflare. (n.d.). DNS records API, Proxy status. Cloudflare Docs. https://developers.cloudflare.com/dns/
 - Vercel. (n.d.). Adding & configuring a custom domain. Vercel Docs. https://vercel.com/docs/domains
 - B-CUBE. (2026). B-CUBE Domain Console 구현 명세(SPEC), 구현 제한점(LIMITATIONS). 프로젝트 저장소 `docs/`.
+
+---
+
+개발·배포·운영 문서는 [DEV.md](DEV.md)를 보세요.
+
+## 라이선스
+
+Copyright (C) 2026 아주대학교 경영대학 소학회 비큐브(B-CUBE)  
+Copyright (C) 2026 B-CUBE, School of Business, Ajou University
+
+이 프로그램은 자유 소프트웨어입니다. [GNU Affero General Public License](LICENSE) 버전 3 또는 (선택에 따라) 그 이후 버전의 조건에 따라 재배포하거나 수정할 수 있습니다(SPDX: `AGPL-3.0-or-later`). 이 프로그램은 유용하게 쓰이길 바라며 배포되지만, 상품성이나 특정 목적 적합성에 대한 묵시적 보증을 포함한 어떠한 보증도 없습니다. 자세한 내용은 [LICENSE](LICENSE)를 보세요.
+
+수정한 버전을 네트워크 서비스로 운영하면 AGPL 13조에 따라 그 서비스 이용자에게 수정된 소스 코드를 받을 수 있는 방법을 제공해야 합니다.

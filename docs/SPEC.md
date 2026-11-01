@@ -2,6 +2,8 @@
 
 > 이 문서는 Claude Code에 전달하는 구현 명세다. 프로젝트 루트에 `SPEC.md`로 두고 다음과 같이 지시한다.
 > "SPEC.md를 읽고 마일스톤 M1부터 순서대로 구현해. 각 마일스톤이 끝나면 멈추고 결과를 보고해."
+>
+> **2026-11-01 변경**: 호스팅을 Cloudflare Workers에서 **Netlify**로, DB를 D1에서 **MongoDB**로 옮겼다. DNS 존(`b-cube.kr`)과 Cloudflare DNS API 사용은 그대로다. 이 문서의 플랫폼 관련 절(§0, §1~4, §10, §12)은 Netlify 기준으로 고쳤다.
 
 ---
 
@@ -9,11 +11,11 @@
 
 1. **마일스톤 단위로 진행**하고, 각 마일스톤이 끝날 때마다 변경 요약과 다음 단계를 보고한 뒤 멈춘다.
 2. **운영 환경에 영향을 주는 명령은 실행 전에 반드시 사용자 확인을 받는다.**
-   - 대상: `wrangler deploy`, `wrangler d1 migrations apply --remote`, `wrangler secret put`, 실제 Cloudflare DNS API 호출
-3. **시크릿을 코드, 커밋, 로그에 절대 남기지 않는다.** `.dev.vars`는 `.gitignore`에 넣고, `.dev.vars.example`만 커밋한다.
+   - 대상: Netlify 운영 배포(`netlify deploy --prod`, 연결 브랜치 push), `npm run db:migrate:remote`, `.env`의 원격 DB에 대한 `db:seed`·`cron --remote`, `netlify env:set`, 실제 Cloudflare DNS API 호출
+3. **시크릿을 코드, 커밋, 로그에 절대 남기지 않는다.** `.env`는 `.gitignore`에 넣고, `.env.example`만 커밋한다.
 4. **이 앱이 생성하지 않은 DNS 레코드는 절대 수정하거나 삭제하지 않는다.** 이 앱이 만들었다는 근거가 DB에 있는 레코드만 조작한다: `records.cf_record_id` 또는 DNS 작업 기록 `dns_ops.cf_ids`(§8). comment(`bcd:lease=`)만 같은 레코드는 근거가 아니다.
 5. 로컬 개발에서는 `DNS_DRY_RUN=true`가 기본값이다. 이 값이 true이면 Cloudflare API를 호출하지 않고 가짜 record id를 반환하며 로그만 남긴다.
-6. 언어는 **TypeScript (strict)** 를 쓴다. 런타임은 Cloudflare Workers이고, Node 전용 API는 `nodejs_compat` 범위 안에서만 쓴다.
+6. 언어는 **TypeScript (strict)** 를 쓴다. 서버 런타임은 Netlify Functions(Node)이다. 앱 로직(`worker/`)은 Netlify 전용 API에 의존하지 않고, `netlify/functions/`의 얇은 진입점만 Netlify에 맞춘다.
 7. 외부 서비스 형식(Vercel 검증 TXT 형식, Cloudflare API 필드 제한 등)은 **구현 시점에 공식 문서로 확인**하고, 이 문서와 다르면 보고한다.
 8. UI 문구는 **한국어**로 작성한다.
 
@@ -22,21 +24,21 @@
 아주대 동아리 B-CUBE 회원(@ajou.ac.kr 계정)이 웹 콘솔에서 `<name>.b-cube.kr` 서브도메인을 대여한다. 대여한 서브도메인은 Vercel, AWS(IP) 등에 연결한다.
 
 - DNS: Cloudflare (b-cube.kr 존, 네임서버가 Cloudflare)
-- 전체 앱: Cloudflare Workers 하나 (API + 정적 프론트 + Cron)
-- 콘솔 주소: `https://domain.b-cube.kr` (Worker 커스텀 도메인)
+- 전체 앱: Netlify 사이트 하나 (정적 프론트 + Functions의 API + 예약 함수)
+- 콘솔 주소: `https://domain.b-cube.kr` (Netlify 커스텀 도메인, Cloudflare DNS에 DNS only CNAME)
 
 ## 2. 기술 스택
 
 | 영역 | 선택 |
 |---|---|
-| 백엔드 | Cloudflare Workers + **Hono** |
-| DB | **Cloudflare D1** (SQLite), 마이그레이션은 `migrations/*.sql` |
+| 백엔드 | Netlify Functions + **Hono** |
+| DB | **MongoDB** (`mongodb` 드라이버, Atlas). 트랜잭션을 쓰므로 복제 세트 필요. 인덱스는 `worker/db.ts`의 `INDEXES` |
 | 프론트 | **React + Vite + `@carbon/react`** (IBM Carbon Design System v11), Sass(`@carbon/styles`) |
-| 번들/개발 | **`@cloudflare/vite-plugin`**: Worker와 SPA를 하나의 Vite 개발 서버(5173)로 실행 |
-| 정적 서빙 | Workers Static Assets (`not_found_handling: "single-page-application"`) |
+| 번들/개발 | Vite. 개발 서버(5173)의 미들웨어(`scripts/vite-functions.ts`)가 `/api/*`, `/auth/*`를 함수 코드로 보낸다. 함수 번들은 배포 시 Netlify가 만든다 |
+| 정적 서빙 | Netlify 정적 배포(`dist/`), SPA 폴백은 `public/_redirects` |
 | JWT 검증 | **`jose`** (`createRemoteJWKSet`) |
 | 입력 검증 | **`zod`** (서버/클라이언트 스키마 공유) |
-| 테스트 | **Vitest + `@cloudflare/vitest-pool-workers`** |
+| 테스트 | **Vitest** (Node, `mongodb-memory-server-core` 복제 세트) |
 | 폰트 | IBM Plex Sans KR |
 
 ## 3. 디렉터리 구조 (권장)
@@ -44,19 +46,27 @@
 ```
 /
 ├─ SPEC.md
-├─ wrangler.jsonc
+├─ netlify.toml
+├─ netlify/functions/
+│  ├─ api.ts                # /api/*, /auth/* → worker handleRequest
+│  └─ cron-{health,daily,drift}.ts  # 예약 함수 → worker handleScheduled
 ├─ vite.config.ts
-├─ .dev.vars.example
-├─ migrations/0001_init.sql
+├─ .env.example
 ├─ scripts/
-│  ├─ seed.ts               # 시드 SQL 생성 + 로컬 D1 적용 (§4.3)
-│  └─ reset-local-db.ts     # 로컬 D1 초기화
+│  ├─ migrate.ts            # 마이그레이션 적용 (로컬, --remote)
+│  ├─ seed.ts               # 시드 SQL 생성 + 로컬 DB 적용 (§4.3)
+│  ├─ reset-local-db.ts     # 로컬 DB 초기화
+│  ├─ run-cron.ts           # 예약 작업 로컬 1회 실행
+│  └─ vite-functions.ts     # dev/preview 서버에서 함수 라우팅
 ├─ shared/                  # 서버·클라이언트 공용
 │  ├─ schemas.ts            # zod 스키마, 타입
 │  └─ rules.ts              # 이름/레코드 검증 규칙(순수 함수)
 ├─ worker/
-│  ├─ index.ts              # Hono 앱 + scheduled 핸들러
+│  ├─ index.ts              # handleRequest(요청), handleScheduled(예약 작업)
+│  ├─ app.ts                # Hono 앱
+│  ├─ db.ts                 # MongoDB 접근: 컬렉션, 인덱스, write/batch(트랜잭션)
 │  ├─ env.ts                # Env 타입, 설정 파싱
+│  ├─ runtime.ts            # 비밀이 아닌 기본값(DEFAULT_VARS) + process.env 읽기
 │  ├─ auth/                 # IdP(OIDC), session, csrf
 │  ├─ middleware/           # requireUser, requireAdmin, csrf, securityHeaders
 │  ├─ routes/               # auth, me, leases, admin, dev(개발 모드에서만 등록)
@@ -77,42 +87,37 @@
 └─ test/
 ```
 
-## 4. 설정 (wrangler.jsonc / 환경변수)
+## 4. 설정 (netlify.toml / 환경변수)
 
-```jsonc
-{
-  "name": "bcube-domain-console",
-  "main": "worker/index.ts",
-  "compatibility_date": "<구현 시점 날짜>",
-  "compatibility_flags": ["nodejs_compat"],
-  "assets": { "not_found_handling": "single-page-application", "run_worker_first": ["/api/*", "/auth/*"] },
-  "routes": [{ "pattern": "domain.b-cube.kr", "custom_domain": true }],
-  "d1_databases": [{ "binding": "DB", "database_name": "bcube-domain", "database_id": "<생성 후 기입>" }],
-  "triggers": { "crons": ["17 * * * *", "0 18 * * *", "30 18 * * SUN"] },
-  "vars": {
-    "APP_ORIGIN": "https://domain.b-cube.kr",
-    "ZONE_NAME": "b-cube.kr",
-    "CF_ZONE_ID": "<사용자 제공>",
-    "IDP_ISSUER": "https://id.b-cube.kr",
-    "IDP_CLIENT_ID": "dyn-f6c226535e6a490f8ff1",
-    "ALLOWED_EMAIL_DOMAIN": "ajou.ac.kr",
-    "REQUIRED_SOHAKOE": "B-cube",
-    "ADMIN_EMAILS": "",
-    "MAX_LEASES_PER_USER": "3",
-    "LEASE_DAYS": "180",
-    "RENEW_WINDOW_DAYS": "30",
-    "NAME_HOLD_DAYS": "30",
-    "HEALTH_GRACE_DAYS": "3",
-    "HEALTH_FAIL_THRESHOLD": "7",
-    "EXTRA_RESERVED_NAMES": "",
-    "DNS_DRY_RUN": "false",
-    "DEV_AUTH_DEBUG": "false",
-    "DEV_FAKE_LOGIN": "false"
-  }
-}
+- `netlify.toml`: 빌드 명령(`npm run build`), 배포 디렉터리(`dist`), Node 버전
+- 함수 경로와 일정은 각 함수 파일의 `export const config`에 둔다(`path: ["/api/*", "/auth/*"]`, `schedule: "17 * * * *"` 등). Netlify가 정적으로 읽으므로 문자열 리터럴로 쓴다.
+- 비밀이 아닌 기본값은 `worker/runtime.ts`의 `DEFAULT_VARS`에 둔다. Netlify 환경 변수(운영)·`.env`(로컬)에 같은 이름이 있으면 그 값이 우선한다.
+
+```ts
+export const DEFAULT_VARS = {
+  APP_ORIGIN: "https://domain.b-cube.kr",
+  ZONE_NAME: "b-cube.kr",
+  CF_ZONE_ID: "",            // 사용자 제공
+  IDP_ISSUER: "https://id.b-cube.kr",
+  IDP_CLIENT_ID: "dyn-8919b43990d5418f9047",
+  ALLOWED_EMAIL_DOMAIN: "ajou.ac.kr",
+  REQUIRED_SOHAKOE: "B-cube",
+  ADMIN_EMAILS: "",
+  MAX_LEASES_PER_USER: "3",
+  LEASE_DAYS: "180",
+  RENEW_WINDOW_DAYS: "30",
+  NAME_HOLD_DAYS: "30",
+  HEALTH_GRACE_DAYS: "3",
+  HEALTH_FAIL_THRESHOLD: "7",
+  EXTRA_RESERVED_NAMES: "",
+  DNS_DRY_RUN: "false",
+  DEV_AUTH_DEBUG: "false",
+  DEV_FAKE_LOGIN: "false",
+};
 ```
 
-- **시크릿** (`wrangler secret put`, 로컬은 `.dev.vars`): `IDP_CLIENT_SECRET`, `CF_API_TOKEN`
+- **시크릿** (Netlify 환경 변수, Secret 표시. 로컬은 `.env`): `IDP_CLIENT_SECRET`, `CF_API_TOKEN`, `DB_CONNECTION_STRING`
+- **DB**: `DB_CONNECTION_STRING`, `DB_NAME`(개발·운영 모두 필수). 비어 있으면 설정 오류(500)다. 접속 문자열은 비밀이며 로그에 남기지 않는다.
 - `env.ts`에서 모든 설정을 파싱하고 검증한다. 필수값이 없으면 기동 시 명확한 에러를 낸다.
   - 단, **개발 모드**(APP_ORIGIN이 `http://localhost:*`)에서는 필수 조건을 완화한다.
     - `DEV_FAKE_LOGIN=true`이면 `IDP_CLIENT_ID`/`IDP_CLIENT_SECRET`이 비어 있어도 기동한다. 이때 `/auth/login`은 "OAuth 미설정 — 개발용 로그인을 사용하세요"라고 안내하는 화면을 보여준다.
@@ -125,17 +130,19 @@
 
 | 스크립트 | 동작 |
 |---|---|
-| `npm run dev` | `vite dev`: SPA(HMR) + Worker + 로컬 D1을 `http://localhost:5173`에서 실행 |
-| `npm run build` | `vite build`: SPA와 Worker 번들 생성 |
-| `npm run preview` | `vite build && vite preview`: 빌드 결과물을 Workers 런타임(workerd)에서 실행해 운영과 같은 동작 확인 |
-| `npm run db:migrate:local` | `wrangler d1 migrations apply bcube-domain --local` |
-| `npm run db:seed` | 로컬 D1에 시드 데이터 투입 (§4.3) |
-| `npm run db:reset` | 로컬 D1 상태 삭제 → 마이그레이션 → 시드 (원클릭 초기화) |
-| `npm run typecheck` | `tsc --noEmit`를 app(`src`, `shared`), worker(`worker`, `shared`, `test`), node(설정 파일, `scripts`) tsconfig 3개에 각각 실행 |
+| `npm run dev` | `vite dev`: SPA(HMR) + 함수 코드를 `http://localhost:5173`에서 실행 |
+| `npm run build` | `vite build`: SPA 빌드(`dist/`). 함수는 Netlify가 배포 시 번들 |
+| `npm run preview` | `vite build && vite preview`: 빌드한 SPA + 함수 코드로 실행 |
+| `npm run db:migrate` | 로컬 DB 마이그레이션 |
+| `npm run db:migrate:remote` | 원격 DB에 인덱스 적용. **실행 전 사용자 확인 필수** |
+| `npm run db:seed` | 로컬 DB에 시드 데이터 투입 (§4.3) |
+| `npm run db:reset` | 로컬 DB 파일 삭제 → 마이그레이션 → 시드 (원클릭 초기화) |
+| `npm run cron -- <job>` | 예약 작업(`health`, `daily`, `drift`)을 로컬 DB로 1회 실행 |
+| `npm run typecheck` | `tsc --noEmit`를 app(`src`, `shared`), worker(`worker`, `shared`, `test`, `netlify`, `scripts`), node(설정 파일) tsconfig 3개에 각각 실행 |
 | `npm test` | Vitest 전체 실행 |
-| `npm run deploy` | `vite build && wrangler deploy`. **실행 전 사용자 확인 필수** |
 
-- `db:*` 스크립트는 **`--local`에만 작동**해야 한다. `--remote`로 시드를 넣는 스크립트는 만들지 않는다.
+- 배포는 Netlify(연결 브랜치 push 또는 `netlify deploy --build --prod`)로 한다. **실행 전 사용자 확인 필수**
+- `db:seed`, `db:reset`, `cron`은 **로컬 파일 DB에만 작동**해야 한다. 원격으로 시드를 넣는 스크립트는 만들지 않는다.
 
 ### 4.2 개발 전용 가짜 로그인 (`DEV_FAKE_LOGIN`)
 
@@ -181,22 +188,29 @@ IdP 클라이언트 없이 모든 화면과 권한 시나리오를 확인하기 
 ### 4.4 로컬 UI 확인 절차 (README에도 그대로 기재)
 
 ```bash
-cp .dev.vars.example .dev.vars   # 기본값: DEV_FAKE_LOGIN=true, DNS_DRY_RUN=true, 시크릿 비움
+cp .env.example .env             # 기본값: DEV_FAKE_LOGIN=true, DNS_DRY_RUN=true, 시크릿 비움. `DB_*`는 채운다
 npm install
 npm run db:reset
 npm run dev                      # → http://localhost:5173
 ```
 
-`.dev.vars.example`의 기본값은 위 절차가 **OAuth 클라이언트나 Cloudflare 토큰 없이** 바로 동작하도록 정한다. 실제 IdP 로그인을 시험할 때만 `IDP_CLIENT_ID`/`IDP_CLIENT_SECRET`을 채운다.
+`.env.example`의 기본값은 위 절차가 **OAuth 클라이언트나 Cloudflare 토큰 없이** 바로 동작하도록 정한다. 실제 IdP 로그인을 시험할 때만 `IDP_CLIENT_SECRET`을 채운다.
 
-## 5. 데이터 모델 (`migrations/0001_init.sql`)
+## 5. 데이터 모델 (`worker/db.ts`)
+
+> **운영과 개발은 같은 Atlas DB를 쓴다(2026-11-01 사용자 결정).**
+> **2026-11-01 MongoDB로 변경.** 아래 테이블은 같은 이름의 컬렉션이고, 열은 같은 이름의 필드다. 아래 SQL은 필드 설명으로 읽는다.
+> - 값이 없으면 null을 저장한다. 공개 id(`leases.id` 등)는 그대로 쓰고, 유일 제약은 유일 인덱스로 둔다.
+> - 자동 증가 id(`audit_logs`, `reconcile_runs`)는 없앴다. API의 `id`는 `_id`(ObjectId)의 16진 문자열이다.
+> - 감사 로그 `detail`, 드리프트 `items`·`repaired`, `dns_ops.cf_ids`, `users.sohakoe_memberships`는 JSON 문자열이 아니라 문서·배열이다.
+> - `uq_leases_name_live`는 부분 유일 인덱스(`status`가 active, suspended)다. MongoDB 6.0 이상이 필요하다.
+> - 여러 쓰기의 원자성은 트랜잭션(`Database.batch`)으로 지킨다.
 
 ```sql
 CREATE TABLE users (
   email          TEXT PRIMARY KEY,          -- 소문자 정규화
   idp_sub        TEXT NOT NULL UNIQUE,      -- IdP sub (Google sub와 같은 값, 0005에서 google_sub를 이름 변경)
   name           TEXT,
-  student_id     TEXT,                      -- 학번 (0005 추가)
   sohakoe_memberships TEXT,                 -- 소학회 이력 JSON 배열 (0005 추가)
   first_login_at INTEGER NOT NULL,          -- unix ms
   last_login_at  INTEGER NOT NULL,
@@ -255,7 +269,7 @@ CREATE TABLE audit_logs (
   lease_id     TEXT,
   target_email TEXT,
   detail       TEXT,                        -- JSON (변경 전/후 값 등)
-  ip           TEXT,                        -- CF-Connecting-IP
+  ip           TEXT,                        -- 클라이언트 IP (Netlify: x-nf-client-connection-ip)
   user_agent   TEXT
 );
 CREATE INDEX idx_audit_at ON audit_logs(at);
@@ -274,11 +288,11 @@ CREATE TABLE reconcile_runs (
 CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
 ```
 
-- `migrations/0002_suspended_at.sql`: `leases.suspended_at INTEGER` (suspended로 바뀐 시각). §10.2의 "suspended 상태로 `NAME_HOLD_DAYS` 경과" 판단에 쓴다.
-- `migrations/0003_dns_ops.sql`:
+- `leases.suspended_at` (suspended로 바뀐 시각). §10.2의 "suspended 상태로 `NAME_HOLD_DAYS` 경과" 판단에 쓴다.
+- `dns_ops`, `reconcile_runs.repaired`:
   - `dns_ops(id, lease_id, kind, cf_ids, started_at, attempts, last_error)`: DNS 작업 기록(§8). `cf_ids`는 이 작업이 만들었거나 지워야 할 Cloudflare 레코드 id(JSON 배열)다.
   - `reconcile_runs.repaired TEXT`: 드리프트 점검의 자동 복구 결과(JSON, §10.3).
-- `migrations/0004_job_locks.sql`: `job_locks(name, started_at, trigger)`. 작업 실행 잠금(§10.2). 해제하지 않고 시간으로 만료된다.
+- `job_locks(name, started_at, trigger)`. 작업 실행 잠금(§10.2). 해제하지 않고 시간으로 만료된다.
 
 **감사 로그 action 목록**: `auth.login`, `auth.login_denied`, `auth.logout`, `lease.create`, `lease.update_records`, `lease.renew`, `lease.release`, `lease.recheck`, `lease.reactivate`, `system.health_fail`, `system.suspend`, `system.expire`, `admin.revoke`, `admin.ban`, `admin.unban`, `system.drift_detected`, `system.dns_repair`, `admin.dns_recover`
 
@@ -290,7 +304,7 @@ CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
   - `state`, `nonce`, `code_verifier`를 생성한다.
   - 이 값들을 `__Host-bcd_oauth` 쿠키에 담는다. 쿠키는 HttpOnly, Secure, SameSite=Lax, Path=/, Max-Age 600이다. 콜백에서 한 번 쓰고 지운다.
   - 다음 주소로 리다이렉트한다: `${IDP_ISSUER}/authorize`
-  - 파라미터: `response_type=code`, `scope=openid email profile student sohakoe`, `code_challenge_method=S256`
+  - 파라미터: `response_type=code`, `scope=openid email profile sohakoe`, `code_challenge_method=S256`
 - `GET /auth/callback`
   1. `error` 쿼리가 있으면 처리한다: `access_denied`는 취소 안내, `unauthorized_client`는 운영진 문의 안내, 그 외는 로그에 남기고 일반 오류를 표시한다.
   2. `state`와 `iss`(RFC 9207, `IDP_ISSUER`와 같아야 함)를 확인하고, 코드를 토큰으로 교환한다(`code_verifier` 포함, 클라이언트 인증은 `client_secret_basic`).
@@ -305,9 +319,13 @@ CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
      - `users.banned_at`이 설정된 사용자는 거부한다.
      - 거부할 때는 `auth.login_denied`를 감사 로그에 남기고, 로그인 페이지에 사유를 표시한다.
   5. 사용자를 찾는다. `idp_sub`가 일치하는 사용자를 먼저 찾고, 없을 때만 email로 기존 계정을 잇는다. sub로 찾은 계정은 토큰의 email이 달라도 같은 계정이다.
-  6. users를 upsert(`idp_sub`, `name`, `student_id`, `sohakoe_memberships`)하고 세션을 생성한 뒤 `/`로 리다이렉트한다. 학적 정보는 학번과 소학회 이력만 저장한다.
+  6. users를 upsert(`idp_sub`, `name`, `sohakoe_memberships`)하고 세션을 생성한 뒤 `/`로 리다이렉트한다. 학적 정보는 소학회 이력만 저장한다. `student` scope는 요청하지 않는다(2026-11-01).
 - 로그아웃은 이 서비스의 세션만 끊는다. IdP에는 로그아웃 엔드포인트와 세션이 없다.
 - `DEV_AUTH_DEBUG=true`이고 `APP_ORIGIN`이 localhost일 때만 `/auth/debug` 페이지를 연다. 이 페이지는 마지막 로그인의 ID 토큰 클레임(`email`, `email_verified`, 소학회 이름)을 보여준다. 운영에서는 라우트 자체를 등록하지 않는다.
+
+- **동의 철회 안내** (2026-11-01): 상단 메뉴에 "B-CUBE 통합 로그인 동의 관리"(`${IDP_ISSUER}/consents`) 링크를 둔다(`/api/me`의 `consentUrl`). 철회해도 이 서비스의 세션은 끊기지 않는다. 넘어온 정보의 삭제 요청 절차는 아직 없다(LIMITATIONS 3.13).
+
+- **회원 탈퇴·정보 삭제** (2026-11-01): `DELETE /api/me`(본문 `confirmEmail`, CSRF 필요), `POST /api/admin/users/:email/delete`(사유 필수, 자기 자신·차단된 사용자 불가). 남은 lease를 끝내고 Cloudflare 레코드를 지운 뒤 트랜잭션으로 사용자·세션을 지우고 lease에 `owner_deleted_at`을 표시한다. 표시된 lease는 같은 계정으로 다시 로그인해도 보이지 않는다(관리 화면에는 보임). lease(`owner_email` 포함), `records` 내용, 감사 로그는 지우지 않는다. 감사 작업: `user.withdraw`, `admin.delete_user`.
 
 ### 6.2 세션 쿠키 (쿠키 공유 리스크 대응)
 
@@ -403,7 +421,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 - **일관성 보장**
   - 레코드 세트를 교체할 때는 순서를 지킨다: 1) 새 레코드 생성 → 2) DB 갱신 → 3) 기존 레코드 삭제.
   - 중간에 실패하면 생성한 것을 롤백한다. 그래도 남는 불일치는 아래 작업 기록으로 복구한다.
-  - D1 batch로 DB 갱신을 원자적으로 처리한다.
+  - DB batch(쓰기 트랜잭션)로 DB 갱신을 원자적으로 처리한다.
   - 내용이 같은 레코드는 건드리지 않는다. CNAME은 같은 host에 둘 이상 둘 수 없어 "생성 후 삭제"가 불가능하므로 기존 레코드를 수정(PATCH)하고, 실패하면 원래 값으로 되돌린다.
   - 3) 기존 레코드 삭제가 실패해도 작업은 성공으로 응답한다. 남은 레코드는 작업 기록에 남아 매시 복구된다.
 - **DNS 작업 기록 (`dns_ops`, intent log)** (`services/dns-ops.ts`, `services/repair.ts`)
@@ -470,7 +488,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 - `expires_at <= now`인 `sessions` 행을 삭제한다. 만료 세션은 조회 단계에서 이미 거부되므로 테이블 정리 목적이다.
 
 ### 10.2 헬스체크: 매시 `17 * * * *`
-- Workers 서브요청 한도를 고려해 매 실행마다 `last_health_check_at`이 가장 오래된 active lease **최대 10개**만 처리한다.
+- 예약 함수 실행 시간 한도(30초)를 고려해 매 실행마다 `last_health_check_at`이 가장 오래된 active lease **최대 10개**만 처리한다.
 - 각 lease는 하루 1회 이상 검사되면 충분하다. 24시간 이내에 검사한 lease는 건너뛴다.
 - 생성 후 `HEALTH_GRACE_DAYS` 이내 lease는 검사는 하되 실패 횟수를 세지 않는다.
 - **판정 로직** (`services/health.ts`):
@@ -483,7 +501,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
          - Netlify: 404이면서 `x-nf-request-id`가 있고 사이트 미존재 페이지인 경우
          - GitHub Pages: 404이면서 "There isn't a GitHub Pages site here" 페이지인 경우
        - 각 신호는 구현 시 실제 응답으로 확인하고, 벤더 시그니처는 하나의 테이블로 관리한다.
-  - **IP 계열(ip)**: `cloudflare:sockets`의 `connect()`로 각 IP의 443 포트, 실패하면 80 포트에 TCP 연결을 시도한다(타임아웃 5초). 하나라도 성공하면 정상이다.
+  - **IP 계열(ip)**: `node:net`의 `connect()`로 각 IP의 443 포트, 실패하면 80 포트에 TCP 연결을 시도한다(타임아웃 5초). 하나라도 성공하면 정상이다.
 - **결과 처리**
   - 성공하면 `health_fail_count=0`, `last_health_ok_at=now`
   - 실패하면 `health_fail_count++`, 감사 로그 `system.health_fail`. 같은 날 중복 기록은 하지 않는다.
@@ -508,7 +526,7 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 - Cloudflare cron은 요일 `0`을 받지 않는다(1–7 또는 `SUN`–`SAT`, 1=일요일). 그래서 `SUN`으로 쓴다.
 - `DNS_DRY_RUN=true`에서는 Cloudflare를 조회하지 않으므로 결과에 그 사실을 `error` 문구로 남긴다(모든 레코드가 DB에만 있음으로 나온다).
 
-`scheduled` 핸들러는 `controller.cron` 값으로 위 세 작업을 분기한다.
+세 작업은 각각 Netlify 예약 함수(`netlify/functions/cron-{health,daily,drift}.ts`)이고, 모두 `handleScheduled(job)`을 호출한다. 일정(UTC)은 `worker/cron/index.ts`의 `CRON_SCHEDULES`와 함수 파일의 `config.schedule`이 같아야 하며 테스트가 이를 확인한다. 예약 함수는 30초 안에 끝나야 한다.
 
 ## 11. 프론트엔드 (IBM Carbon)
 
@@ -546,8 +564,8 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 
 - **단위**: `shared/rules.ts`의 모든 규칙
   - 이름 정규식, 예약어, 금칙어, IP 사설 대역 경계값, CNAME 정규화와 금지 대상, 레코드 구성 조합, Vercel TXT 값 형식
-- **테스트 환경**: `vitest.config.ts`를 `vite.config.ts`와 분리한다(`cloudflare()` 플러그인 충돌 방지). Workers 런타임 테스트 패키지는 `@cloudflare/vitest-pool-workers`의 후속인 `@cloudflare/vitest-plugin`을 쓴다. 바인딩은 개인 `.dev.vars`와 무관하게 설정 파일에 고정하고, 각 테스트 파일 실행 전에 D1 마이그레이션을 적용한다.
-- **통합** (Workers 런타임, D1 로컬, Cloudflare API와 IdP는 fetch mock):
+- **테스트 환경**: `vitest.config.ts`를 `vite.config.ts`와 분리한다. Node에서 실행하고, 인메모리 MongoDB 복제 세트(`test/global-setup.ts`)에 테스트 파일마다 새 DB를 만들어 인덱스를 적용한다(`test/env.ts`, `test/setup.ts`). 설정 값은 개인 `.env`와 무관하게 `test/env.ts`에 고정한다. 요청은 `handleRequest`를 직접 호출한다.
+- **통합** (Node, 인메모리 MongoDB, Cloudflare API와 IdP는 fetch mock):
   - 로그인 허용/거부(도메인, `email_verified`, 소학회 이력, 관리자 예외, 차단 사용자), IdP 응답 검증(state, iss, 서명, aud, exp, nonce, alg)
   - CSRF: Origin 누락, 다른 서브도메인 Origin, 토큰 불일치 → 403
   - 1인당 한도, 남의 lease 접근 → 404, 일반 사용자의 admin API 접근 → 403
@@ -565,13 +583,13 @@ lease 하나(`alice`)의 레코드 구성 규칙:
 
 | # | 내용 | 완료 기준 |
 |---|---|---|
-| M1 | 프로젝트 골격: Vite + Cloudflare 플러그인 + Hono + React/Carbon, wrangler.jsonc, `.dev.vars.example`, D1 마이그레이션, env 파싱(개발 모드 완화 + 안전장치), npm 스크립트(§4.1), 세션 기반 + **개발 전용 가짜 로그인**(§4.2), **시드 스크립트**(§4.3), DEV/DRY-RUN 배지 | **OAuth 클라이언트와 Cloudflare 토큰이 없는 상태에서** §4.4 절차만으로 `npm run dev` → 로그인 화면의 페르소나 버튼으로 로그인 → Carbon 셸(Header, 배지, 로그아웃)과 `/api/health`, `/api/me` 응답 확인. `npm run preview`도 같은 방식으로 동작 |
+| M1 | 프로젝트 골격: Vite + Hono + React/Carbon, Netlify 설정(2026-11-01 이전, 당시는 Cloudflare 플러그인 + wrangler.jsonc), `.env.example`, DB 마이그레이션, env 파싱(개발 모드 완화 + 안전장치), npm 스크립트(§4.1), 세션 기반 + **개발 전용 가짜 로그인**(§4.2), **시드 스크립트**(§4.3), DEV/DRY-RUN 배지 | **OAuth 클라이언트와 Cloudflare 토큰이 없는 상태에서** §4.4 절차만으로 `npm run dev` → 로그인 화면의 페르소나 버튼으로 로그인 → Carbon 셸(Header, 배지, 로그아웃)과 `/api/health`, `/api/me` 응답 확인. `npm run preview`도 같은 방식으로 동작 |
 | M2 | Google OAuth, CSRF, 보안 헤더, `/auth/debug`(개발 전용). 가짜 로그인과 세션 생성 함수 공유 | 로컬 로그인 성공/거부 테스트 통과, 개발 기능 차단 테스트 통과 |
 | M3 | `shared/rules.ts` + 단위 테스트 | 규칙 테스트 전부 통과 |
 | M4 | Cloudflare DNS 서비스(dry-run) + lease API + 감사 로그 | 통합 테스트 통과 |
 | M5 | 사용자 UI (목록/생성/상세/반납) | `DNS_DRY_RUN=true` + 가짜 로그인 + 시드 상태에서, **OAuth·Cloudflare 토큰 없이** 다음을 모두 화면으로 확인: ① `user`: 상태별 Tag 4종, 만료 임박 배너, suspended 재확인 안내, 생성 4단계 흐름(대상 3종), 상세·편집·연장·반납 ② `full`: 새 서브도메인 버튼 비활성과 툴팁 ③ `new`: 빈 상태 화면 ④ `banned`: 로그인 거부 화면 ⑤ 모바일 폭(375px) 레이아웃. 확인한 화면 목록을 보고에 포함 |
 | M6 | 관리자 API + UI (회수/차단/감사 로그/드리프트) | 통합 테스트 통과 + `admin` 페르소나와 시드로 4개 탭(회수 이력, 차단 사용자, 감사 로그 필터·페이지네이션, 드리프트 2건) 화면 확인 |
-| M7 | Cron 3종 (만료/헬스/드리프트) | 로컬 `scheduled` 트리거 테스트 통과 |
+| M7 | Cron 3종 (만료/헬스/드리프트) | `handleScheduled` 테스트 통과, 함수 일정 일치 테스트 통과 |
 | M8 | README(로컬 실행, 배포 절차, 운영 가이드), 배포 준비 | **사용자 확인 후** remote 마이그레이션과 deploy |
 
 ## 14. 범위 밖 (이번에 구현하지 않음)

@@ -1,7 +1,7 @@
 # 진척 보고 — B-CUBE Domain Console
 
 > 기준 문서: [SPEC.md](SPEC.md)
-> 기준 시점: 2026-10-27, 커밋 `b7239fe` (M2~M8 README 변경을 작업 단위 커밋 11개로 나눠 커밋함. push 전)
+> 기준 시점: 2026-11-01, 커밋 `bc13856` + 작업 트리(M9 Netlify 이전, AGPL 라이선스, 커밋 전)
 > 작업 단위(WBS)는 SPEC §13 마일스톤을 1단계로, 각 절의 구현 항목을 2단계로 나눈다.
 
 상태 표기: `완료` · `진행` (일부 구현 또는 골격만 있음) · `미착수` · `확인 필요` (구현은 있으나 완료 기준 확인 기록 없음)
@@ -14,13 +14,14 @@
 | M2 | OAuth, CSRF, 보안 헤더, 개발 기능 차단 | 12 | 12 | 0 | 완료 (실계정 로그인 확인 남음) |
 | M3 | 검증 규칙(`shared/rules.ts`) + 단위 테스트 | 10 | 10 | 0 | 완료 |
 | M4 | DNS 서비스 + lease API + 감사 로그 | 14 | 14 | 0 | 완료 |
-| M5 | 사용자 UI | 13 | 11 | 0 | 확인 필요 (2건, 화면 확인) |
+| M5 | 사용자 UI | 14 | 12 | 0 | 확인 필요 (2건, 화면 확인) |
 | M6 | 관리자 API + UI | 13 | 12 | 0 | 확인 필요 (1건, 화면 확인) |
 | M7 | Cron 3종 | 9 | 8 | 0 | 확인 필요 (1건, 벤더 시그니처) |
-| M8 | README, 배포 | 8 | 3 | 1 | 배포 진행 중 (cron 등록 실패 수정, 재배포 필요) |
-| | **합계** | **94** | **84** | **1** | **약 89%** |
+| M8 | README, 배포 (Netlify + MongoDB) | 9 | 4 | 0 | 사용자 확인 대기 (배포 명령) |
+| M9 | Cloudflare Workers → Netlify 이전, 원격 통합, MongoDB 전환, 탈퇴, IdP 재등록, 소학회 설정 | 15 | 15 | 0 | 완료 (실제 배포 확인은 8.8) |
+| | **합계** | **111** | **101** | **0** | **약 90%** |
 
-현재 위치: SPEC의 코드 작업은 모두 구현했다(테스트 7개 파일 284건 통과, 2026-10-28 드리프트 자동 복구 추가). 남은 것은 화면 확인(1.15, 5.12, 5.13, 6.13), 벤더 시그니처 실측(7.4), 운영 배포(8.3, 8.5~8.8, 사용자 확인 필요)다. 2026-10-28 첫 배포에서 cron 등록이 실패해 요일 표기를 고쳤다(8.7). 구현 제한점은 [LIMITATIONS.md](LIMITATIONS.md)에 정리했다.
+현재 위치: 2026-11-01 `origin/master`(IdP 전환 포함)를 받아 Netlify 이전과 통합하고(M9), 사용자 요청으로 DB를 MongoDB로 바꿨다(9.10). 회원 탈퇴와 관리자 회원 정보 삭제를 추가했다(9.12). 테스트 7개 파일 308건 통과(인메모리 MongoDB). Atlas 인덱스 적용 완료(9.13). 남은 것은 실사용 확인, 화면 확인(1.15, 5.12, 5.13, 6.13), 벤더 시그니처 실측(7.4), 운영 배포(8.2~8.8, 사용자 확인 필요)다. 구현 제한점은 [LIMITATIONS.md](LIMITATIONS.md)에 정리했다.
 
 진행 순서 변경 (2026-10-27):
 1. 도메인 화면을 먼저 확인하기 위해 M2의 OAuth(2.1, 2.2), `/auth/debug`(2.8), M2 테스트(2.10~2.12)를 보류하고 M3 → M4 → M5 순서로 진행한다. 가짜 로그인과 `DNS_DRY_RUN=true`만으로 개발할 수 있어 OAuth가 없어도 막히지 않는다. 보류한 M2 작업은 M5 이후에 진행한다.
@@ -127,6 +128,7 @@
 | 5.11 | `ToastNotification`, `DataTableSkeleton` / `InlineLoading` | §11 | 완료 |  |
 | 5.12 | 모바일 폭(375px) 레이아웃 | §11 | 확인 필요 | 레이아웃 CSS 작성(표 가로 스크롤, 입력 행 줄바꿈). 375px 실제 화면 확인 기록 없음 |
 | 5.13 | 페르소나별 화면 확인 (`user`, `full`, `new`, `banned`) | §13 | 확인 필요 | 격리된 dev 서버(dry-run + 가짜 로그인)에서 API 스모크와 모듈 변환까지 확인. 브라우저 화면 확인 기록 없음. 시드의 `member1`은 이미 한도 도달이라 생성 흐름은 `newbie`로 확인해야 함 |
+| 5.14 | B-CUBE 로고를 파비콘과 README에 적용 | - | 완료 | 2026-10-29. `public/favicon.svg`를 B-CUBE 로고로 교체하고 README 상단에 표시 |
 
 ### M6. 관리자 API + UI
 
@@ -158,7 +160,7 @@
 | 7.2 | 만료 처리 (`0 18 * * *`) | §10.1 | 완료 | `worker/cron/expiry.ts`. 1회 최대 50개. 만료 세션 삭제도 같은 cron |
 | 7.3 | 헬스 판정: CNAME 계열 (DoH 조회 + HTTP GET) | §10.2 | 완료 | `worker/services/health.ts`. DoH A/AAAA 병렬 조회, HTTP 10초 타임아웃 |
 | 7.4 | 벤더 "주인 없음" 시그니처 테이블 (Vercel, Netlify, GitHub Pages) | §10.2 | 확인 필요 | `VENDOR_SIGNATURES` 테이블(Vercel, Netlify, GitHub Pages) 구현. 실제 응답으로 확인하지 않음(모두 `verified: false`) |
-| 7.5 | 헬스 판정: IP 계열 (`cloudflare:sockets` TCP 443/80) | §10.2 | 완료 | 443 → 80, 5초 타임아웃. 실제 IPv6 연결은 미확인 |
+| 7.5 | 헬스 판정: IP 계열 (TCP 443/80) | §10.2 | 완료 | 443 → 80, 5초 타임아웃. 2026-11-01 `cloudflare:sockets` → `node:net`. 실제 IPv6 연결은 미확인 |
 | 7.6 | 헬스 결과 처리 (실패 누적, 유예 기간, 1회 실행 10개, suspend) | §10.2 | 완료 | `worker/cron/health.ts`. 실패는 KST 하루 1회만 누적·기록 |
 | 7.7 | suspended가 `NAME_HOLD_DAYS` 지나면 expired 전환 | §10.2 | 완료 | `migrations/0002_suspended_at.sql`로 suspended 시각 저장, 만료 cron에서 처리 |
 | 7.8 | 드리프트 점검 (`30 18 * * SUN`), 자동 삭제 없음 | §10.3 | 완료 | `worker/cron/reconcile.ts`. TXT 따옴표·AAAA 축약·CNAME 대소문자 정규화 후 비교. 조회 실패도 `ok=0`으로 기록 |
@@ -171,13 +173,36 @@
 | ID | 작업 | SPEC | 상태 | 비고 |
 |---|---|---|---|---|
 | 8.1 | README (로컬 실행 §4.4, 배포 절차, 운영 가이드) | §4.4, §13 | 완료 | `README.md` (로컬 실행, cron 수동 실행, 배포 절차, 운영 가이드). 제한점은 `docs/LIMITATIONS.md` |
-| 8.2 | 운영 D1 생성, `database_id` 기입 | §4 | 완료 | 사용자 작업. `wrangler.jsonc`에 실제 id 기입 확인 (2026-10-28) |
-| 8.3 | 운영 vars 기입 (`CF_ZONE_ID`, `GOOGLE_CLIENT_ID`, `ADMIN_EMAILS`) | §4 | 미착수 | 사용자 제공 값 |
-| 8.4 | Google OAuth 클라이언트 리디렉트 URI 등록 | §6.1 | 완료 | 사용자 작업. 체크리스트 4번대로 설정했다고 보고받음 (2026-10-27) |
-| 8.5 | `wrangler secret put` (`GOOGLE_CLIENT_SECRET`, `CF_API_TOKEN`) | §4 | 미착수 | 실행 전 사용자 확인 필수 |
-| 8.6 | `wrangler d1 migrations apply --remote` | §0-2 | 미착수 | 실행 전 사용자 확인 필수. 적용 대상 0001~0003. 2026-10-28 운영 로그인 콜백이 `completeLogin`의 첫 D1 쿼리(`users` 조회)에서 500. 원격 마이그레이션 미적용으로 추정(권한상 운영 D1 미조회) |
-| 8.7 | `npm run deploy`, 커스텀 도메인 연결 | §0-2 | 진행 중 | 사용자 실행 (2026-10-28). 업로드와 `domain.b-cube.kr` 연결은 성공, cron 등록이 `invalid cron string: 30 18 * * 0`으로 실패. 요일을 `SUN`으로 고침. 다시 배포해야 cron 3개가 등록됨 |
-| 8.8 | 운영 스모크 확인 (로그인, `/api/health`, 보안 헤더) | §13 | 미착수 | |
+| 8.2 | 운영 MongoDB 준비 | §4 | 진행 | 2026-11-01 사용자가 Atlas 접속 정보를 `.env`에 넣음. 연결·버전(8.0)·복제 세트를 읽기로 확인. 운영·개발 공용(사용자 결정). 예전 D1(`bcube-domain`)에 데이터가 있으면 별도 이전 필요(DEV.md) |
+| 8.3 | Netlify 환경 변수 입력 (`DB_NAME`, `CF_ZONE_ID`, `ADMIN_EMAILS`) | §4 | 미착수 | 사용자 제공 값 |
+| 8.4 | IdP 클라이언트 등록 (redirect_uri, scope) | §6.1 | 완료 | 2026-10-30 동적 등록. 관리자 승인과 비밀값 입력은 5절 0번. 주소가 같으므로 Netlify 이전 후에도 그대로 쓴다 |
+| 8.5 | 시크릿 입력 (`IDP_CLIENT_SECRET`, `CF_API_TOKEN`, `DB_CONNECTION_STRING`, `netlify env:set --secret`) | §4 | 미착수 | 실행 전 사용자 확인 필수 |
+| 8.6 | 원격 인덱스 적용 `npm run db:migrate:remote` | §0-2 | 완료 | 2026-11-01 사용자 지시로 실행(9.13) |
+| 8.7 | Netlify 배포, 커스텀 도메인 연결 | §0-2 | 미착수 | 실행 전 사용자 확인 필수. 2026-10-28 Workers 배포는 이전으로 폐기. Cloudflare에 남은 Worker와 `domain.b-cube.kr` 커스텀 도메인 레코드는 사용자가 정리 |
+| 8.8 | 운영 스모크 확인 (로그인, `/api/health`, 보안 헤더, 예약 함수 3개) | §13 | 미착수 | |
+| 8.9 | 라이선스 명시 (AGPL-3.0-or-later) | - | 완료 | 2026-11-01 사용자 요청. `LICENSE`(GNU 공식 AGPL v3 전문), README "라이선스" 절, `package.json` `license`. 저작권자: 아주대학교 경영대학 소학회 비큐브(B-CUBE), 영문 B-CUBE, School of Business, Ajou University. AGPL 13조에 따라 운영 서비스 이용자에게 소스 제공 필요(README에 안내) |
+
+### M9. Cloudflare Workers → Netlify 이전 (2026-11-01)
+
+완료 기준: Cloudflare 런타임 의존(wrangler, D1, `cloudflare:*`, Workers 전용 API) 제거, 기존 테스트 전부 통과, 로컬 dev·preview 동작, Netlify 번들러로 함수 인식.
+
+| ID | 작업 | SPEC | 상태 | 비고 |
+|---|---|---|---|---|
+| 9.1 | DB: D1 → libSQL(Turso). D1 형태(prepare/bind/first/all/run/batch)를 유지하는 래퍼 | §2, §4 | 완료 | `worker/db.ts`. 서비스 SQL은 그대로, 타입만 교체. 원격 URL은 HTTP 전용 클라이언트(`@libsql/client/web`)를 써서 함수 번들에 네이티브 모듈이 필요 없다(Netlify 번들러가 플랫폼별 바이너리를 빠뜨리는 것을 확인하고 바꿈) |
+| 9.2 | Netlify 함수 진입점: `api`(경로 `/api/*`, `/auth/*`), 예약 함수 3개, `netlify.toml`, `public/_redirects` | §3, §4, §10 | 완료 | `worker/index.ts`를 `handleRequest`, `handleScheduled`로 정리. cron은 작업 이름(`health`/`daily`/`drift`)으로 분기 |
+| 9.3 | 설정: wrangler vars → `worker/runtime.ts` `DEFAULT_VARS` + Netlify 환경 변수. 운영에서 `TURSO_DATABASE_URL` 필수 | §4 | 완료 | `worker/env.ts`에 `Env` 타입과 변수 목록 정의(wrangler 생성 타입 대체) |
+| 9.4 | Workers 전용 API 교체 | §10.2, §5 | 완료 | `cloudflare:sockets` → `node:net`, `crypto.subtle.timingSafeEqual` → `node:crypto`, `CF-Connecting-IP` → `x-nf-client-connection-ip` |
+| 9.5 | 로컬 개발: Vite 미들웨어로 함수 라우팅, 마이그레이션·시드·초기화·cron 스크립트 | §4.1, §4.4 | 완료 | `@netlify/vite-plugin`은 의존성(`precinct` → `typescript-estree`)이 TypeScript 7에서 로드되지 않아 쓰지 않고 `scripts/vite-functions.ts`로 대체. `.dev.vars` → `.env`. dev에서 가짜 로그인 → CSRF → lease 생성 확인, preview에서 `/api/health` 200 확인 |
+| 9.6 | 테스트를 Node + 임시 SQLite로 이전 | §12 | 완료 | `@cloudflare/vitest-plugin` 제거. 272건 통과(기존 269건 + 함수 일정 일치 3건) |
+| 9.7 | Netlify 번들 확인 | - | 완료 | 로컬에서 zip-it-and-ship-it로 번들: 함수 4개, 경로 2개, 일정 3개 인식. 번들한 `api` 함수를 직접 호출해 네이티브 모듈 없이 로드되고 라우팅되는 것 확인. 실제 배포는 8.7~8.8 |
+| 9.8 | `origin/master`(44커밋: IdP 전환, DNS 복구, 프록시 강제 등)와 통합 | §2, §4, §8 | 완료 | 2026-11-01 사용자 요청. master를 fast-forward한 뒤 M9 변경을 다시 적용. `dns-ops`, `repair`, `job-lock`을 libSQL 타입으로 옮기고 `test/repair.test.ts`를 Node로 이전. `pnpm-lock.yaml` 갱신, README는 원격의 기획서 형식 유지, 개발 문서는 `DEV.md`. 커밋 전 |
+| 9.10 | DB: Turso(libSQL) → MongoDB | §2, §4, §5 | 완료 | 2026-11-01 사용자 요청. `DB_CONNECTION_STRING`, `DB_NAME`. SQL 전부를 드라이버 호출로 교체, batch는 트랜잭션, 이름 유일은 부분 유일 인덱스. 감사 로그·드리프트 id는 문자열로 변경. `migrations/` 삭제, 인덱스는 `db:migrate`. 스크립트는 원격 DB에 `--remote` 요구. 테스트는 인메모리 복제 세트(이름 인덱스·동시 생성·정규식 이스케이프 2건 추가, 300건). 번들한 `api` 함수로 health 200 확인. 실제 Atlas에는 읽기만 했고 쓰기는 하지 않음 |
+| 9.11 | `student` scope 제거, 학번 저장 제거 | §5, §6.1 | 완료 | 2026-11-01 사용자 결정. 요청 scope는 `openid email profile sohakoe`. IdP 등록 정보의 scope 정리는 사용자 작업(체크리스트) |
+| 9.12 | 회원 탈퇴(상단 메뉴, `DELETE /api/me`), 관리자 회원 정보 삭제(사용자 탭) | §6.1, §9, §11 | 완료 | 2026-11-01 사용자 요청. 감사 로그, lease(소유자 이메일), DNS 레코드 내용은 사용자 결정으로 그대로 보존. 다시 로그인해도 예전 lease는 본인에게 보이지 않음(`owner_deleted_at`). Cloudflare 실패 시 삭제 중단. 차단된 사용자는 해제 후 삭제. 테스트 8건 추가. 브라우저 화면 확인 기록 없음 |
+| 9.13 | Atlas 인덱스 적용 `npm run db:migrate:remote` | §5 | 완료 | 2026-11-01 사용자 지시로 실행. 컬렉션 8개, 부분 유일 인덱스 포함 확인. 운영·개발 DB를 나누지 않는다(사용자 결정, LIMITATIONS 3.16) |
+| 9.14 | IdP 클라이언트 재등록 (`student` 제외) | §6.1 | 완료 | 2026-11-01 사용자가 등록 토큰 제공. `client_id` `dyn-8919b43990d5418f9047`, `pending` 승인 대기. 비밀값은 `.env`에만 저장(커밋 안 됨) |
+| 9.15 | 필수 소학회 이름을 환경 변수로 설정 | §4 | 완료 | 2026-11-01 사용자 요청. 코드는 이미 `REQUIRED_SOHAKOE`를 읽고 있어 `.env`, `.env.example`, `DEV.md`에 드러냄 |
+| 9.9 | SP_MIGRATION_PROMPT 최신판 반영: 동의 철회 링크(상단 메뉴, `/api/me`의 `consentUrl`), 문서 | §6.1 | 완료 | 나머지 항목은 #15에서 적용됨을 코드로 확인. 삭제 요청 절차는 없음(LIMITATIONS 3.13) |
 
 ## 3. 구현 중 확인·보고할 사항
 
@@ -197,6 +222,7 @@
 | 테스트가 `wrangler.jsonc`의 운영 `REQUIRE_HD=true`에 영향받음 | 2.x | 해결 (2026-10-28). `vitest.config.ts` 바인딩에 `REQUIRE_HD`, `EXTRA_RESERVED_NAMES` 고정 |
 | 모든 A/AAAA/CNAME을 프록시로 등록한 뒤 실제 동작 | 3.8 | 미확인 (2026-10-28 변경). Vercel이 프록시 뒤에서 인증서를 발급하는지, 헬스체크(`https://<fqdn>/` 요청과 벤더 시그니처)가 프록시를 거쳐도 맞게 판정하는지 배포 후 확인 필요. 변경 전에 만든 레코드는 proxied=false 그대로이고, 소유자가 레코드를 편집하면 그때 프록시로 바뀐다 |
 | 실제 Google 계정 로그인과 `hd` 클레임 (체크리스트 7번) | 2.1, 2.2, 2.8 | 미확인. 사용자가 브라우저에서 직접 로그인해야 한다. 로컬 `/auth/login`이 Google로 올바른 파라미터(PKCE, `redirect_uri=http://localhost:5173/auth/callback`)와 함께 리다이렉트하는 것까지 확인 (2026-10-27) |
+| SP_MIGRATION_PROMPT.md(B-CUBE IdP 전환) 적용 여부 | 9.8, 9.9 | 2026-11-01 확인·반영. 로컬이 `origin/master`보다 44커밋 뒤처져 미적용 상태였고, 통합 후 코드로 대조. 최신판의 동의 철회 링크와 문서를 추가. `student` scope는 제거(9.11). 삭제는 탈퇴 메뉴와 관리자 버튼으로 처리(9.12) |
 
 ## 4. SPEC과 다른 점
 
@@ -214,7 +240,7 @@
 | 레코드 입력 `host`는 FQDN, 대소문자와 끝의 점 정규화 | §7.2 |
 | `/api/me` 응답에 `zone` 추가 | §9 |
 | 사용자 차단 시 suspended lease도 회수, 자기 자신 차단 금지 | §9 |
-| 테스트 설정 분리, `@cloudflare/vitest-plugin`, 바인딩 고정과 마이그레이션 적용 | §12 |
+| 테스트 설정 분리, `@cloudflare/vitest-plugin`, 바인딩 고정과 마이그레이션 적용 (2026-11-01 Node + 임시 SQLite로 변경) | §12 |
 | 2026-10-27: 매일 cron에서 만료 세션 삭제 (세션은 D1 유지, JWT 전환 검토 후 기각) | §10.1 |
 | 2026-10-27: `leases.suspended_at` 컬럼 추가 (`migrations/0002_suspended_at.sql`) | §5 |
 | 2026-10-27: 레코드 교체 시 같은 레코드 유지, CNAME은 PATCH, 기존 레코드 삭제 실패는 성공 처리 후 드리프트로 감지 | §8 |
@@ -229,6 +255,10 @@
 | 2026-10-28: 폰트를 jsDelivr CDN에서 불러오고 CSP에 `cdn.jsdelivr.net` 추가 | §6.4, 디자인 |
 | 2026-10-28: 드리프트 cron 요일을 `0`에서 `SUN`으로 변경 (Cloudflare cron은 요일 `0`을 받지 않음) | §4, §10.3 |
 | 2026-10-28: A/AAAA/CNAME 레코드는 연결 대상과 무관하게 Cloudflare 프록시(proxied=true) 강제, TXT는 false. 사용자 화면의 프록시 토글 제거, 연결 가이드와 수동 체크리스트 문구 수정 | §7.2, §11 |
+| 2026-11-01: 호스팅을 Netlify, DB를 Turso(libSQL)로 변경(사용자 요청). 드리프트 cron은 표준 표기 `30 18 * * 0`으로 되돌림. 예약 함수 30초 제한 반영 | §0~4, §10, §12 |
+| 2026-11-01: B-CUBE IdP 동의 철회 링크 추가 | §6.1 |
+| 2026-11-01: `student` scope와 `users.student_id` 제거 | §5, §6.1 |
+| 2026-11-01: DB를 Turso에서 MongoDB로 변경(사용자 요청, 이전 전 배포 없음). 데이터 모델은 같은 이름의 컬렉션·필드 | §0, §2, §4, §5, §12 |
 
 ## 4-1. 문서 작업 기록
 
@@ -239,9 +269,10 @@
 
 ## 5. 다음 작업
 
-0. B-CUBE IdP 전환 마무리 (2026-10-30, 코드와 테스트 완료, #15 리뷰·배포 전): 동적 등록 완료(RFC 7591, `client_id` `dyn-f6c226535e6a490f8ff1`을 `IDP_CLIENT_ID`에 반영, 2026-10-30). 남은 일은 등록 토큰 폐기(작업 중 `wrangler.jsonc`에 들어갔다가 제거, 커밋되지 않음), 관리자 승인(`b_cube_status: pending`), `IDP_CLIENT_SECRET` 입력, `/auth/debug`로 실제 소학회 이름 확인, 원격 마이그레이션 직후 배포, 기존 Google 클라이언트 삭제 (사용자)
-1. 로컬 D1 재시드: `npm run db:reset` (시드에 `suspended_at` 추가. 0002 마이그레이션은 로컬에 적용 완료. 0005 적용도 이 명령으로 된다)
+0. B-CUBE IdP 마무리: 클라이언트 재등록 완료(2026-11-01, `client_id` `dyn-8919b43990d5418f9047`, scope `openid email profile sohakoe`, `client_secret`은 `.env`). 남은 일은 관리자 승인(`b_cube_status: pending`), 쓴 등록 토큰 폐기, 예전 클라이언트 `dyn-f6c226535e6a490f8ff1` 삭제, Netlify에 `IDP_CLIENT_SECRET` 입력, `/auth/debug`로 실제 소학회 이름 확인, 기존 Google 클라이언트 삭제 (사용자)
+1. 운영·개발 공용 DB 주의: 지금 `.env`는 `DEV_FAKE_LOGIN=false`, `DNS_DRY_RUN=false`라 `npm run dev`가 실제 DB와 실제 DNS를 쓴다. 시드와 dry-run은 운영 DB에 쓰지 않는다(LIMITATIONS 3.16)
 2. 화면 확인 (사용자): 1.15(`dev`, `preview`), 5.12(375px), 5.13(페르소나별), 6.13(관리 탭 4개)
 3. 실제 IdP로 로그인하고 `/auth/debug`에서 소학회 이름 확인 → `REQUIRED_SOHAKOE` 확정 (사용자)
 4. 7.4: 벤더별 주인 없음 응답 실측 후 `VENDOR_SIGNATURES` 확정
-5. M8 배포(8.3, 8.5~8.8): cron 수정 반영해 `npm run deploy` 다시 실행, Workers 대시보드 Triggers에 cron 3개 확인. 운영에 영향을 주는 명령이므로 사용자 확인 후 실행
+5. M8 배포(8.2, 8.3, 8.5~8.8): DEV.md 배포 절차대로. 운영에 영향을 주는 명령이므로 사용자 확인 후 실행
+6. Cloudflare 정리 (사용자): 예전 Worker `bcube-domain-console` 삭제, D1 데이터 이전 여부 결정 후 D1 삭제
