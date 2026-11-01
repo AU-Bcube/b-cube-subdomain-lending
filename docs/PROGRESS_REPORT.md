@@ -1,7 +1,7 @@
 # 진척 보고 — B-CUBE Domain Console
 
 > 기준 문서: [SPEC.md](SPEC.md)
-> 기준 시점: 2026-11-01, 브랜치 `fix/idp-client-id-env`(`master` 병합 전). PR #17, #18은 병합됨
+> 기준 시점: 2026-11-01, 브랜치 `20-docs/copyright-notice`(`master` 병합 전). PR #17, #18, #19는 병합됨
 > 작업 단위(WBS)는 SPEC §13 마일스톤을 1단계로, 각 절의 구현 항목을 2단계로 나눈다.
 
 상태 표기: `완료` · `진행` (일부 구현 또는 골격만 있음) · `미착수` · `확인 필요` (구현은 있으나 완료 기준 확인 기록 없음)
@@ -180,7 +180,7 @@
 | 8.6 | 원격 인덱스 적용 `npm run db:migrate:remote` | §0-2 | 완료 | 2026-11-01 사용자 지시로 실행(9.13) |
 | 8.7 | Netlify 배포, 커스텀 도메인 연결 | §0-2 | 미착수 | 실행 전 사용자 확인 필수. 2026-10-28 Workers 배포는 이전으로 폐기. Cloudflare에 남은 Worker와 `domain.b-cube.kr` 커스텀 도메인 레코드는 사용자가 정리 |
 | 8.8 | 운영 스모크 확인 (로그인, `/api/health`, 보안 헤더, 예약 함수 3개) | §13 | 미착수 | |
-| 8.9 | 라이선스 명시 (AGPL-3.0-or-later) | - | 완료 | 2026-11-01 사용자 요청. `LICENSE`(GNU 공식 AGPL v3 전문), README "라이선스" 절, `package.json` `license`. 저작권자: 아주대학교 경영대학 소학회 비큐브(B-CUBE), 영문 B-CUBE, School of Business, Ajou University. AGPL 13조에 따라 운영 서비스 이용자에게 소스 제공 필요(README에 안내) |
+| 8.9 | 라이선스 명시 (AGPL-3.0-or-later) | - | 완료 | 2026-11-01 사용자 요청. `LICENSE`(맨 위 저작권 표기 + GNU 공식 AGPL v3 전문), README "라이선스" 절, `package.json` `license`, `author`(영문 표기, 이슈 #20). 저작권자: 아주대학교 경영대학 소학회 비큐브(B-CUBE), 영문 B-CUBE, School of Business, Ajou University. AGPL 13조에 따라 운영 서비스 이용자에게 소스 제공 필요(README에 안내) |
 
 ### M9. Cloudflare Workers → Netlify 이전 (2026-11-01)
 

@@ -3,6 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "license": "AGPL-3.0-or-later",
+  "author": "B-CUBE, School of Business, Ajou University",
   "type": "module",
   "packageManager": "pnpm@12.16.1",
   "scripts": {
