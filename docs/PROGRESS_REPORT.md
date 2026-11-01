@@ -273,7 +273,7 @@
 ## 5. 다음 작업
 
 0. B-CUBE IdP 마무리: 클라이언트 재등록 완료(2026-11-01, `client_id`는 `.env`의 `IDP_CLIENT_ID`, scope `openid email profile sohakoe`, `client_secret`은 `.env`). 남은 일은 관리자 승인(`b_cube_status: pending`), 쓴 등록 토큰 폐기, 예전 클라이언트 `dyn-f6c226535e6a490f8ff1` 삭제, Netlify에 `IDP_CLIENT_ID`, `IDP_CLIENT_SECRET` 입력, `/auth/debug`로 실제 소학회 이름 확인, 기존 Google 클라이언트 삭제 (사용자)
-1. 운영·개발 공용 DB 주의: 지금 `.env`는 `DEV_FAKE_LOGIN=false`, `DNS_DRY_RUN=false`라 `npm run dev`가 실제 DB와 실제 DNS를 쓴다. 시드와 dry-run은 운영 DB에 쓰지 않는다(LIMITATIONS 3.16)
+1. 운영·개발 공용 DB 주의: 지금 `.env`는 `DEV_FAKE_LOGIN=true`, `DNS_DRY_RUN=false`(2026-11-01 사용자 결정으로 유지)라 `pnpm run dev`가 실제 DB와 실제 DNS를 쓴다. 페르소나 로그인은 실제 DB에 사용자·세션·감사 로그를 남기고, 페르소나의 생성·편집·반납은 실제 DNS를 바꾼다. 시드와 dry-run은 운영 DB에 쓰지 않는다(LIMITATIONS 3.16). 2026-11-01 화면 측정 중 이 설정의 dev 서버에 잘못 붙어 생긴 `member1` 페르소나의 사용자·세션을 삭제했고, 감사 로그 `auth.login` 1건은 보존했다
 2. 화면 확인 (사용자): 1.15(`dev`, `preview`), 5.13(페르소나별), 6.13(관리 탭 4개). 실제 휴대폰에서 5.12 한 번 확인 권장
 3. 실제 IdP로 로그인하고 `/auth/debug`에서 소학회 이름 확인 → `REQUIRED_SOHAKOE` 확정 (사용자)
 4. 7.4: 벤더별 주인 없음 응답 실측 후 `VENDOR_SIGNATURES` 확정
