@@ -24,9 +24,11 @@ export function RecordPreview({ records, label = "DNS 레코드" }: { records: r
         <StructuredListBody>
           {records.map((r, i) => (
             <StructuredListRow key={`${r.type}-${r.host}-${r.content}-${i}`}>
-              <StructuredListCell>{r.type}</StructuredListCell>
-              <StructuredListCell className="mono break">{r.host}</StructuredListCell>
-              <StructuredListCell className="mono break">
+              <StructuredListCell data-label="타입">{r.type}</StructuredListCell>
+              <StructuredListCell className="mono break" data-label="호스트">
+                {r.host}
+              </StructuredListCell>
+              <StructuredListCell className="mono break" data-label="값">
                 {r.content}
                 {r.live === false && (
                   <Tag type="gray" size="sm" className="inline-tag">
@@ -34,7 +36,7 @@ export function RecordPreview({ records, label = "DNS 레코드" }: { records: r
                   </Tag>
                 )}
               </StructuredListCell>
-              <StructuredListCell>{r.proxied ? "켬" : "끔"}</StructuredListCell>
+              <StructuredListCell data-label="프록시">{r.proxied ? "켬" : "끔"}</StructuredListCell>
             </StructuredListRow>
           ))}
         </StructuredListBody>

@@ -7,6 +7,8 @@
 $font-sans: 'IBM Plex Sans KR', 'IBM Plex Sans', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
 // D2Coding은 index.html에서 jsDelivr CDN으로 불러온다.
 $font-mono: 'D2Coding', ui-monospace, SFMono-Regular, Menlo, monospace;
+// Carbon sm 구간(42rem 미만)
+$bp-sm: 41.98rem;
 
 html,
 body {
@@ -22,8 +24,21 @@ select {
   font-family: $font-sans;
 }
 
+// 앱 영역 밖(iOS 하단 영역, 스크롤 끝)에 흰 배경이 드러나지 않게 App.tsx의 테마 배경색(g10, g100)과 맞춘다.
+html,
+body {
+  background: #f4f4f4;
+
+  @media (prefers-color-scheme: dark) {
+    background: #161616;
+  }
+}
+
 .app-root {
+  // 본문의 margin-top이 밖으로 겹치면 앱 영역이 48px 밀려 짧은 페이지에도 스크롤이 생긴다.
+  display: flow-root;
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--cds-background);
   color: var(--cds-text-primary);
 }
@@ -41,6 +56,15 @@ select {
   margin-left: 0.5rem;
 }
 
+// 그리드 자식의 기본 최소 폭(내용 폭) 때문에 페이지가 뷰포트보다 넓어지는 것을 막는다.
+.cds--css-grid-column {
+  min-width: 0;
+}
+
+.cds--stack-vertical {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .page-title {
   margin-bottom: 1.5rem;
 }
@@ -52,14 +76,26 @@ select {
 
   .login-card {
     width: 100%;
-    max-width: 28rem;
+    max-width: 42rem;
   }
 
   .login-tile {
-    padding: 2rem;
+    // 오류 알림처럼 내용이 늘어나면 박스도 함께 늘어나도록 최소 높이만 정한다.
+    min-height: 24rem;
+    padding: 2.5rem;
     display: flex;
     flex-direction: column;
+    justify-content: center;
     gap: 1.25rem;
+
+    // Stack 간격 1rem에 더해 제목–설명 2rem, 설명–버튼 5rem이 된다.
+    h1 {
+      margin-bottom: 1rem;
+    }
+
+    .cds--btn {
+      margin-top: 4rem;
+    }
   }
 
   .dev-personas {
@@ -103,6 +139,15 @@ select {
 
   .cds--select--inline {
     padding: 0 0.5rem;
+  }
+
+  // 검색창에 밀려 필터 글자가 잘리지 않게 한다.
+  .cds--select {
+    flex: 0 0 auto;
+  }
+
+  .cds--select-input {
+    min-width: 7.5rem;
   }
 }
 
@@ -254,6 +299,16 @@ select {
   flex-wrap: wrap;
   gap: 0.75rem;
   margin-top: 0.5rem;
+
+  // .mono의 글자 크기가 제목 크기를 덮어쓰지 않게 한다.
+  .mono {
+    font-size: inherit;
+    min-width: 0;
+  }
+
+  h1.mono {
+    font-size: 1.75rem;
+  }
 }
 
 .detail-actions {
@@ -333,7 +388,148 @@ select {
   }
 }
 
-@media (max-width: 42rem) {
+.drift-lines {
+  margin: 0.25rem 0 0.5rem;
+  padding-left: 1rem;
+  list-style: disc;
+  word-break: break-all;
+}
+
+// iOS Safari는 글자 크기가 16px보다 작은 입력란에 초점이 가면 화면을 확대한다.
+@media (pointer: coarse) {
+  .cds--text-input,
+  .cds--text-area,
+  .cds--select-input,
+  .cds--search-input {
+    font-size: 1rem;
+  }
+}
+
+// 휴대폰 폭
+@media (max-width: $bp-sm) {
+  // 좌우 여백은 그리드 여백(1rem)만 남긴다.
+  .app-content {
+    padding-top: calc(3rem + 1rem);
+    padding-inline: 0;
+  }
+
+  // cds--type-* 클래스는 빌드에 포함되지 않아 Carbon 기본 제목 크기가 그대로 나온다. 좁은 화면에서는 여기서 크기를 정한다.
+  .cds--type-heading-05,
+  .cds--type-heading-04,
+  .detail-title h1.mono {
+    font-size: 2rem;
+    line-height: 1.3;
+  }
+
+  .cds--type-heading-03 {
+    font-size: 1.25rem;
+    line-height: 1.4;
+  }
+
+  .cds--type-heading-02 {
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+
+  .cds--type-body-compact-01,
+  .kind-desc {
+    font-size: 0.875rem;
+    line-height: 1.4;
+  }
+
+  .cds--type-helper-text-01 {
+    font-size: 0.75rem;
+    line-height: 1.35;
+  }
+
+  .cds--header__name {
+    white-space: nowrap;
+  }
+
+  // 알림의 최소 폭(18rem)이 카드 안에서 넘치지 않게 한다.
+  .cds--inline-notification,
+  .cds--actionable-notification {
+    min-inline-size: 0;
+    max-inline-size: 100%;
+  }
+
+  // 탭 4개를 한 줄에 나눠 담는다.
+  .cds--tabs--contained {
+    .cds--tab--list,
+    .cds--tabs__nav-item {
+      min-width: 0;
+    }
+
+    .cds--tab--list {
+      width: 100%;
+    }
+
+    .cds--tabs__nav-item {
+      flex: 1 1 0;
+      padding-inline: 0.5rem;
+    }
+  }
+
+  .login-page {
+    // 그리드 여백 1rem과 합쳐 박스와 화면 끝 사이가 1.5rem이 된다.
+    padding: 1rem 0.5rem;
+
+    .login-tile {
+      min-height: 24rem;
+      padding: 2rem;
+    }
+  }
+
+  .section-tile,
+  .guide-tile,
+  .empty-tile {
+    padding: 1rem;
+  }
+
+  // 버튼은 폭을 똑같이 나눠 쓴다.
+  .cds--btn-set .cds--btn {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .detail-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+
+    .cds--btn {
+      width: 100%;
+      max-width: none;
+    }
+  }
+
+  // 진행 단계 4개를 가로 스크롤 없이 한 줄에 보여 준다.
+  .steps {
+    overflow-x: visible;
+
+    .cds--progress-step {
+      min-width: 0;
+      flex: 1 1 0;
+    }
+
+    // 최소 폭(8rem)이 있으면 마지막 단계의 선이 뷰포트 밖으로 나가 페이지가 넓어진다.
+    .cds--progress-line {
+      min-width: 0;
+    }
+
+    .cds--progress-label {
+      max-width: none;
+      white-space: normal;
+      word-break: keep-all;
+      margin-right: 0.25rem;
+    }
+
+    .cds--progress-text {
+      min-width: 0;
+    }
+  }
+
   .record-row,
   .record-row--txt {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -342,11 +538,188 @@ select {
       grid-column: 1 / -1;
     }
   }
+
+  // 표 도구 모음: 검색과 필터, 버튼을 전체 폭으로 쌓는다.
+  .cds--table-toolbar {
+    height: auto;
+    min-height: 3rem;
+  }
+
+  .cds--toolbar-content {
+    flex-wrap: wrap;
+    width: 100%;
+    height: auto;
+
+    > .cds--btn,
+    > .tooltip-trigger,
+    > .tooltip-trigger .cds--btn,
+    > .cds--tooltip,
+    > .cds--tooltip .tooltip-trigger,
+    > .cds--tooltip .cds--btn {
+      width: 100%;
+      max-width: none;
+    }
+  }
+
+  .admin-toolbar {
+    .cds--search {
+      flex: 1 1 100%;
+    }
+  }
+
+  // 표를 카드 목록으로 바꾼다. 첫 칸(data-label 없음)은 카드 제목이다.
+  .table-scroll.table-cards {
+    overflow-x: visible;
+
+    .cds--data-table {
+      display: block;
+      min-width: 0;
+    }
+
+    thead {
+      display: none;
+    }
+
+    tbody,
+    tbody tr {
+      display: block;
+      height: auto;
+    }
+
+    tbody tr {
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--cds-border-subtle);
+    }
+
+    tbody td {
+      display: block;
+      height: auto;
+      padding: 0.25rem 1rem;
+      border: 0;
+      overflow-wrap: anywhere;
+
+      &:empty {
+        display: none;
+      }
+
+      &[data-label] {
+        display: grid;
+        grid-template-columns: 6rem minmax(0, 1fr);
+        column-gap: 0.75rem;
+        align-items: start;
+
+        &::before {
+          content: attr(data-label);
+          font-size: 0.75rem;
+          line-height: 1.25rem;
+          color: var(--cds-text-secondary);
+        }
+
+        // 내용이 여러 요소여도 오른쪽 열 하나에 쌓는다.
+        > * {
+          grid-column: 2;
+        }
+
+        > .cds--tag {
+          justify-self: start;
+        }
+      }
+
+      // 작업이 없는 행은 라벨도 숨긴다.
+      &[data-label='작업']:not(:has(> *)) {
+        display: none;
+      }
+
+      .cds--btn--sm {
+        min-height: 2.5rem;
+        align-items: center;
+      }
+    }
+
+    .nowrap {
+      white-space: normal;
+    }
+  }
+
+  // 레코드 표도 같은 방식으로 카드로 바꾼다.
+  .table-scroll--narrow {
+    overflow-x: visible;
+
+    .cds--structured-list {
+      display: block;
+      min-width: 0;
+      margin-bottom: 0;
+    }
+
+    .cds--structured-list-thead {
+      display: none;
+    }
+
+    .cds--structured-list-tbody,
+    .cds--structured-list-row {
+      display: block;
+    }
+
+    .cds--structured-list-row {
+      padding: 0.5rem 0;
+    }
+
+    // Carbon의 condensed·첫 칸 여백보다 우선하도록 선택자를 길게 쓴다.
+    .cds--structured-list .cds--structured-list-row .cds--structured-list-td {
+      display: grid;
+      grid-template-columns: 4rem minmax(0, 1fr);
+      column-gap: 0.75rem;
+      padding: 0.25rem 0;
+      border: 0;
+
+      &::before {
+        content: attr(data-label);
+        font-family: $font-sans;
+        font-size: 0.75rem;
+        line-height: 1.25rem;
+        color: var(--cds-text-secondary);
+      }
+
+      > * {
+        grid-column: 2;
+        justify-self: start;
+      }
+    }
+
+    .inline-tag {
+      margin: 0.25rem 0 0;
+    }
+  }
 }
 
-.drift-lines {
-  margin: 0.25rem 0 0.5rem;
-  padding-left: 1rem;
-  list-style: disc;
-  word-break: break-all;
+// 태블릿 폭: 표는 가로로 스크롤하되 작업 열은 항상 보이게 한다.
+@media (min-width: 42rem) and (max-width: 65.98rem) {
+  .table-scroll.table-cards .cds--data-table {
+    min-width: 60rem;
+  }
+
+  .table-cards {
+    th:last-child,
+    td:last-child {
+      position: sticky;
+      right: 0;
+      z-index: 1;
+      box-shadow: -1px 0 0 var(--cds-border-subtle);
+    }
+
+    th:last-child {
+      background: var(--cds-layer-accent-01);
+    }
+
+    td:last-child {
+      background: var(--cds-layer-01);
+    }
+  }
+}
+
+// 개발용 표시까지 넣으면 헤더가 넘치는 폭. 운영에는 이 표시가 없다.
+@media (max-width: 23rem) {
+  .header-tags {
+    display: none;
+  }
 }
