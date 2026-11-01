@@ -100,7 +100,6 @@ export const DEFAULT_VARS = {
   ZONE_NAME: "b-cube.kr",
   CF_ZONE_ID: "",            // 사용자 제공
   IDP_ISSUER: "https://id.b-cube.kr",
-  IDP_CLIENT_ID: "dyn-8919b43990d5418f9047",
   ALLOWED_EMAIL_DOMAIN: "ajou.ac.kr",
   REQUIRED_SOHAKOE: "B-cube",
   ADMIN_EMAILS: "",
@@ -117,6 +116,7 @@ export const DEFAULT_VARS = {
 };
 ```
 
+- **환경별 값** (Netlify 환경 변수, 로컬은 `.env`. 기본값 없음): `IDP_CLIENT_ID`, `DB_NAME`, `CF_ZONE_ID`, `ADMIN_EMAILS`
 - **시크릿** (Netlify 환경 변수, Secret 표시. 로컬은 `.env`): `IDP_CLIENT_SECRET`, `CF_API_TOKEN`, `DB_CONNECTION_STRING`
 - **DB**: `DB_CONNECTION_STRING`, `DB_NAME`(개발·운영 모두 필수). 비어 있으면 설정 오류(500)다. 접속 문자열은 비밀이며 로그에 남기지 않는다.
 - `env.ts`에서 모든 설정을 파싱하고 검증한다. 필수값이 없으면 기동 시 명확한 에러를 낸다.
