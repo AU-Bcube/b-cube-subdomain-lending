@@ -77,7 +77,7 @@ export function UsersTab() {
         {loading && !data ? (
           <DataTableSkeleton headers={HEADERS.map((header) => ({ header }))} columnCount={HEADERS.length} rowCount={5} showHeader={false} showToolbar={false} />
         ) : (
-          <div className="table-scroll">
+          <div className="table-scroll table-cards">
             <Table size="md" aria-label="사용자 목록">
               <TableHead>
                 <TableRow>
@@ -102,12 +102,12 @@ export function UsersTab() {
                         </Tag>
                       )}
                     </TableCell>
-                    <TableCell>{user.name ?? "-"}</TableCell>
-                    <TableCell>
+                    <TableCell data-label="이름">{user.name ?? "-"}</TableCell>
+                    <TableCell data-label="보유">
                       {user.liveLeaseCount} / {user.totalLeaseCount}
                     </TableCell>
-                    <TableCell>{formatDateTime(user.lastLoginAt)}</TableCell>
-                    <TableCell>
+                    <TableCell data-label="마지막 로그인">{formatDateTime(user.lastLoginAt)}</TableCell>
+                    <TableCell data-label="상태">
                       {user.bannedAt ? (
                         <>
                           <Tag type="red" size="sm">
@@ -123,7 +123,7 @@ export function UsersTab() {
                         </Tag>
                       )}
                     </TableCell>
-                    <TableCell>
+                    <TableCell data-label="작업">
                       {user.bannedAt ? (
                         <Button kind="ghost" size="sm" onClick={() => setPending({ kind: "unban", user })}>
                           차단 해제

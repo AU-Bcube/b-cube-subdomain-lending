@@ -79,7 +79,7 @@ export function LeasesTab() {
         {loading && !data ? (
           <DataTableSkeleton headers={HEADERS.map((header) => ({ header }))} columnCount={HEADERS.length} rowCount={5} showHeader={false} showToolbar={false} />
         ) : (
-          <div className="table-scroll">
+          <div className="table-scroll table-cards">
             <Table size="md" aria-label="전체 임대 목록">
               <TableHead>
                 <TableRow>
@@ -104,9 +104,9 @@ export function LeasesTab() {
                           {lease.name}.{zone}
                         </span>
                       </TableCell>
-                      <TableCell>{lease.ownerEmail}</TableCell>
-                      <TableCell>{TARGET_KIND_LABELS[lease.targetKind]}</TableCell>
-                      <TableCell>
+                      <TableCell data-label="소유자">{lease.ownerEmail}</TableCell>
+                      <TableCell data-label="대상">{TARGET_KIND_LABELS[lease.targetKind]}</TableCell>
+                      <TableCell data-label="상태">
                         <Tag type={st.tag} size="sm">
                           {st.text}
                         </Tag>
@@ -114,7 +114,7 @@ export function LeasesTab() {
                           <div className="cell-sub">{STATUS_REASON_LABELS[lease.statusReason] ?? lease.statusReason}</div>
                         )}
                       </TableCell>
-                      <TableCell>
+                      <TableCell data-label="레코드">
                         <ul className="record-list">
                           {lease.records.map((r) => (
                             <li key={r.id} className={r.live ? undefined : "record-off"} title={r.live ? undefined : "Cloudflare에 없음"}>
@@ -124,8 +124,8 @@ export function LeasesTab() {
                           ))}
                         </ul>
                       </TableCell>
-                      <TableCell>{live ? formatDate(lease.expiresAt) : formatDate(lease.endedAt)}</TableCell>
-                      <TableCell>
+                      <TableCell data-label="만료·종료">{live ? formatDate(lease.expiresAt) : formatDate(lease.endedAt)}</TableCell>
+                      <TableCell data-label="작업">
                         {live && (
                           <Button kind="danger--ghost" size="sm" onClick={() => setRevoking(lease)}>
                             강제 회수

@@ -161,7 +161,7 @@ export function MyLeasesPage() {
                 </TableToolbarContent>
               </TableToolbar>
               {limitReached && <p className="limit-note cds--type-helper-text-01">{limitText}</p>}
-              <div className="table-scroll">
+              <div className="table-scroll table-cards">
                 <Table size="md" aria-label="내 서브도메인 목록">
                   <TableHead>
                     <TableRow>
@@ -181,18 +181,20 @@ export function MyLeasesPage() {
                               {lease.fqdn}
                             </Link>
                           </TableCell>
-                          <TableCell>
+                          <TableCell data-label="연결 대상">
                             <div>{TARGET_KIND_LABELS[lease.targetKind]}</div>
                             <div className="cell-sub mono">{targetSummary(lease)}</div>
                           </TableCell>
-                          <TableCell>
+                          <TableCell data-label="상태">
                             <Tag type={st.tag} size="sm">
                               {st.text}
                             </Tag>
                             {lease.statusReason && <div className="cell-sub">{STATUS_REASON_LABELS[lease.statusReason] ?? lease.statusReason}</div>}
                           </TableCell>
-                          <TableCell className="nowrap">{live ? formatDate(lease.expiresAt) : `종료 ${formatDate(lease.endedAt)}`}</TableCell>
-                          <TableCell>
+                          <TableCell className="nowrap" data-label="만료일">
+                            {live ? formatDate(lease.expiresAt) : `종료 ${formatDate(lease.endedAt)}`}
+                          </TableCell>
+                          <TableCell data-label="마지막 헬스체크">
                             {lease.lastHealthCheckAt ? (
                               <>
                                 <div className="nowrap">{formatDateTime(lease.lastHealthCheckAt)}</div>
@@ -202,9 +204,9 @@ export function MyLeasesPage() {
                               "-"
                             )}
                           </TableCell>
-                          <TableCell>
+                          <TableCell data-label="작업">
                             {live && (
-                              <OverflowMenu aria-label={`${lease.fqdn} 작업`} flipped size="sm" disabled={busyId === lease.id}>
+                              <OverflowMenu aria-label={`${lease.fqdn} 작업`} flipped size="md" disabled={busyId === lease.id}>
                                 <OverflowMenuItem itemText="편집" disabled={lease.status !== "active"} onClick={() => navigate(`/leases/${lease.id}?edit=1`)} />
                                 <OverflowMenuItem itemText="연장" disabled={!lease.renewable} onClick={() => void renew(lease)} />
                                 <OverflowMenuItem itemText="재확인" onClick={() => void recheck(lease)} />
