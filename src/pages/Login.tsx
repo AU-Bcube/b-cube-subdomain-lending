@@ -15,7 +15,7 @@ const ERROR_MESSAGES: Record<string, string> = {
 };
 
 export function LoginPage() {
-  const { me, dev } = useSession();
+  const { loading, me, dev } = useSession();
   const [params] = useSearchParams();
   const error = params.get("error");
 
@@ -43,7 +43,9 @@ export function LoginPage() {
                     lowContrast
                   />
                 )}
-                <Button href="/auth/login">B-CUBE 계정으로 로그인</Button>
+                <Button href="/auth/login" disabled={loading}>
+                  {loading ? "페이지 정보를 불러오고 있습니다." : "B-CUBE 계정으로 로그인"}
+                </Button>
               </Stack>
             </Tile>
 

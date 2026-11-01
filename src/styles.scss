@@ -478,6 +478,11 @@ body {
     .login-tile {
       min-height: 24rem;
       padding: 2rem;
+
+      // 아이콘이 없는 버튼이라 오른쪽 아이콘 자리를 줄여 불러오는 중 문구가 320px에서도 넘치지 않게 한다.
+      .cds--btn {
+        padding-inline-end: 1rem;
+      }
     }
   }
 

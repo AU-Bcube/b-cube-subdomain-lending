@@ -1,6 +1,6 @@
 import { Content, Loading, Theme } from "@carbon/react";
 import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AppHeader } from "./components/AppHeader";
 import { LoginPage } from "./pages/Login";
 import { MyLeasesPage } from "./pages/MyLeases";
@@ -39,13 +39,20 @@ function RequireAdmin({ children }: { children: ReactNode }) {
 export function App() {
   const dark = usePrefersDark();
   const { loading } = useSession();
+  const { pathname } = useLocation();
+  // 세션 확인 중에는 로그인 화면을 먼저 보여 주고, 끝나면 로그인 상태에 따라 갈라진다.
+  const showLoginWhileLoading = pathname === "/" || pathname === "/login";
 
   return (
     <Theme theme={dark ? "g100" : "g10"} className="app-root">
       <AppHeader />
       <Content id="main-content" className="app-content">
         {loading ? (
-          <Loading description="불러오는 중" withOverlay={false} />
+          showLoginWhileLoading ? (
+            <LoginPage />
+          ) : (
+            <Loading description="불러오는 중" withOverlay={false} />
+          )
         ) : (
           <Suspense fallback={<Loading description="불러오는 중" withOverlay={false} />}>
             <Routes>
