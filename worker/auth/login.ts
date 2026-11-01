@@ -19,7 +19,6 @@ export interface LoginIdentity {
   email: string;
   emailVerified: boolean;
   name?: string | undefined;
-  studentId?: string | undefined;
   sohakoeMemberships: SohakoeMembership[];
 }
 
@@ -55,10 +54,7 @@ export async function completeLogin(
   const email = identity.email.trim().toLowerCase();
   const devDetail = options.dev ? { dev: true } : {};
   // 사용자는 sub로 식별한다. email은 sub가 처음 보일 때 기존 계정을 잇는 데만 쓴다.
-  const { results: matches } = await db
-    .prepare(`SELECT email, idp_sub, banned_at FROM users WHERE idp_sub = ? OR email = ?`)
-    .bind(identity.sub, email)
-    .all<{ email: string; idp_sub: string; banned_at: number | null }>();
+  const matches = await db.users.find({ $or: [{ idp_sub: identity.sub }, { email }] }).toArray();
   const existing = matches.find((u) => u.idp_sub === identity.sub) ?? matches[0] ?? null;
   const accountEmail = existing?.email ?? email;
 
@@ -76,27 +72,11 @@ export async function completeLogin(
   }
 
   const now = Date.now();
-  await db
-    .prepare(
-      `INSERT INTO users (email, idp_sub, name, student_id, sohakoe_memberships, first_login_at, last_login_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(email) DO UPDATE SET
-         idp_sub = excluded.idp_sub,
-         name = COALESCE(excluded.name, users.name),
-         student_id = COALESCE(excluded.student_id, users.student_id),
-         sohakoe_memberships = excluded.sohakoe_memberships,
-         last_login_at = excluded.last_login_at`,
-    )
-    .bind(
-      accountEmail,
-      identity.sub,
-      identity.name ?? null,
-      identity.studentId ?? null,
-      JSON.stringify(identity.sohakoeMemberships),
-      now,
-      now,
-    )
-    .run();
+  // 이름은 토큰에 없으면 기존 값을 유지한다.
+  const set: Record<string, unknown> = { idp_sub: identity.sub, sohakoe_memberships: identity.sohakoeMemberships, last_login_at: now };
+  const onInsert: Record<string, unknown> = { first_login_at: now, banned_at: null, ban_reason: null };
+  (identity.name != null ? set : onInsert).name = identity.name ?? null;
+  await db.users.updateOne({ email: accountEmail }, { $set: set, $setOnInsert: onInsert }, { upsert: true });
 
   await createSession(c, accountEmail);
   await writeAudit(db, {

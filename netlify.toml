@@ -1,0 +1,10 @@
+# Netlify 배포 설정. 환경 변수(비밀 포함)는 Netlify UI 또는 `netlify env:set`으로 넣는다.
+# 비밀이 아닌 기본값은 worker/runtime.ts DEFAULT_VARS에 있다.
+
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "22"
+

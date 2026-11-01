@@ -9,6 +9,7 @@ interface SessionState {
   dev: DevConfig | null;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
+  withdraw: (confirmEmail: string) => Promise<void>;
 }
 
 const SessionContext = createContext<SessionState | null>(null);
@@ -54,8 +55,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  const withdraw = useCallback(async (confirmEmail: string) => {
+    await api("/api/me", { method: "DELETE", json: { confirmEmail } });
+    setCsrfToken(null);
+    setMe(null);
+  }, []);
+
   return (
-    <SessionContext.Provider value={{ loading, me, dev, refresh, logout }}>{children}</SessionContext.Provider>
+    <SessionContext.Provider value={{ loading, me, dev, refresh, logout, withdraw }}>{children}</SessionContext.Provider>
   );
 }
 

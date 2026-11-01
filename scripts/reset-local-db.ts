@@ -1,25 +1,34 @@
 /**
- * 로컬 D1 원클릭 초기화: 로컬 D1 상태 삭제 → 마이그레이션 → 시드.
- * `.wrangler/state/v3/d1`(로컬 전용)만 지운다. remote DB는 건드리지 않는다.
+ * 로컬 DB 초기화: 앱 컬렉션 삭제 → 인덱스 → 시드.
+ * localhost DB에서만 동작한다. 원격 DB는 지우지 않는다(--remote를 받지 않는다).
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { INDEXES, openDatabase } from "../worker/db";
+import { connectionFromEnv, isLocalUri, loadDotEnv, ROOT } from "./local-env";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const D1_STATE = join(ROOT, ".wrangler", "state", "v3", "d1");
+loadDotEnv();
+const { uri, name } = connectionFromEnv();
+if (!isLocalUri(uri)) {
+  console.error(`DB_CONNECTION_STRING이 원격 DB입니다(DB_NAME: ${name}). db:reset은 localhost DB 전용입니다.`);
+  process.exit(1);
+}
 
-function run(cmd: string, args: string[]) {
-  const r = spawnSync(cmd, args, { cwd: ROOT, stdio: "inherit", env: { ...process.env, CI: "1" } });
+const db = openDatabase(uri, name);
+try {
+  await db.dropCollections(Object.keys(INDEXES));
+} finally {
+  await db.close();
+}
+console.log(`✔ 로컬 DB 초기화: ${name}`);
+
+function run(script: string) {
+  const r = spawnSync(process.execPath, [join(ROOT, "node_modules", "tsx", "dist", "cli.mjs"), join(ROOT, "scripts", script)], {
+    cwd: ROOT,
+    stdio: "inherit",
+  });
   if (r.status !== 0) process.exit(r.status ?? 1);
 }
 
-if (existsSync(D1_STATE)) {
-  rmSync(D1_STATE, { recursive: true, force: true });
-  console.log(`✔ 로컬 D1 상태 삭제: ${D1_STATE}`);
-}
-console.log("ℹ 개발 서버(npm run dev)가 실행 중이었다면 재시작하세요.");
-
-run(join(ROOT, "node_modules", ".bin", "wrangler"), ["d1", "migrations", "apply", "bcube-domain", "--local"]);
-run(process.execPath, [join(ROOT, "node_modules", "tsx", "dist", "cli.mjs"), join(ROOT, "scripts", "seed.ts")]);
+run("migrate.ts");
+run("seed.ts");

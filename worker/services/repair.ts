@@ -8,9 +8,10 @@
  * 이 앱이 만들었다는 근거(records.cf_record_id 또는 dns_ops.cf_ids)가 DB에 있는 레코드만 조작한다(SPEC §0-4).
  * comment만 같은 레코드는 건드리지 않는다.
  */
+import { NO_ID, type Database } from "../db";
 import { auditStatement } from "./audit";
 import type { DnsClient } from "./cloudflare-dns";
-import { OP_MAX_ATTEMPTS, OP_STALE_MS, parseCfIds, type DnsOpRow } from "./dns-ops";
+import { OP_MAX_ATTEMPTS, OP_STALE_MS } from "./dns-ops";
 import { recordMatches } from "./drift";
 import { getLease, getRecordsByLease, recordSnapshot, removeFromCloudflare, rowToNormalized, toDnsData } from "./leases";
 
@@ -29,7 +30,7 @@ export function changedCount(r: RepairResult): number {
 }
 
 export async function repairLease(
-  db: D1Database,
+  db: Database,
   dns: DnsClient,
   leaseId: string,
   opCfIds: readonly string[] = [],
@@ -61,7 +62,7 @@ export async function repairLease(
       const cf = row.cf_record_id ? remote.get(row.cf_record_id) : undefined;
       if (!cf) {
         const cfId = await dns.create(toDnsData(rowToNormalized(row)), leaseId);
-        await db.prepare(`UPDATE records SET cf_record_id = ?, updated_at = ? WHERE id = ?`).bind(cfId, now, row.id).run();
+        await db.records.updateOne({ id: row.id }, { $set: { cf_record_id: cfId, updated_at: now } });
         result.recreated++;
       } else if (!recordMatches(row, cf)) {
         await dns.update(cf.id, toDnsData(rowToNormalized(row)), leaseId);
@@ -94,34 +95,38 @@ export async function repairLease(
  * 동시 실행 방지는 호출하는 쪽이 잠금(services/job-lock.ts)으로 한다.
  */
 export async function recoverPendingOps(
-  db: D1Database,
+  db: Database,
   dns: DnsClient,
   now = Date.now(),
   opts: { limit?: number; retryExhausted?: boolean } = {},
 ): Promise<{ recovered: number; failed: number; results: RepairResult[] }> {
-  const { results: ops } = await db
-    .prepare(
-      `SELECT * FROM dns_ops WHERE (started_at < ? OR kind = 'repair') AND (attempts < ? OR ?)
-        ORDER BY started_at LIMIT ?`,
+  const ops = await db.dnsOps
+    .find(
+      {
+        $or: [{ started_at: { $lt: now - OP_STALE_MS } }, { kind: "repair" }],
+        ...(opts.retryExhausted ? {} : { attempts: { $lt: OP_MAX_ATTEMPTS } }),
+      },
+      NO_ID,
     )
-    .bind(now - OP_STALE_MS, OP_MAX_ATTEMPTS, opts.retryExhausted ? 1 : 0, opts.limit ?? 20)
-    .all<DnsOpRow>();
+    .sort({ started_at: 1 })
+    .limit(opts.limit ?? 20)
+    .toArray();
   let recovered = 0;
   let failed = 0;
   const repaired: RepairResult[] = [];
   for (const op of ops) {
     try {
-      const r = await repairLease(db, dns, op.lease_id, parseCfIds(op.cf_ids), now);
-      await db.prepare(`DELETE FROM dns_ops WHERE id = ?`).bind(op.id).run();
+      const r = await repairLease(db, dns, op.lease_id, op.cf_ids, now);
+      await db.dnsOps.deleteOne({ id: op.id });
       recovered++;
       if (changedCount(r) > 0) repaired.push(r);
     } catch (err) {
       failed++;
       console.error("[repair] 작업 기록 복구 실패", op.id, op.lease_id, err);
-      await db
-        .prepare(`UPDATE dns_ops SET attempts = attempts + 1, last_error = ? WHERE id = ?`)
-        .bind(err instanceof Error ? err.message : String(err), op.id)
-        .run();
+      await db.dnsOps.updateOne(
+        { id: op.id },
+        { $inc: { attempts: 1 }, $set: { last_error: err instanceof Error ? err.message : String(err) } },
+      );
     }
   }
   return { recovered, failed, results: repaired };

@@ -1,22 +1,16 @@
-import { env } from "cloudflare:test";
+import { env } from "./env";
 import { describe, expect, it } from "vitest";
-import type { AdminLeaseItem, AdminUserItem, AuditLogItem, DriftResponse, Paged } from "../shared/schemas";
-import { ADMIN_EMAIL, auditFor, call, createLease, createUser, login, uid } from "./helpers";
+import type { AdminLeaseItem, AdminUserItem, AuditLogItem, DriftItem, DriftResponse, Paged } from "../shared/schemas";
+import { ADMIN_EMAIL, auditFor, call, createLease, createUser, login, uid, type Session } from "./helpers";
 
 const ZONE = "b-cube.kr";
 
 async function leaseRow(id: string) {
-  return env.DB.prepare(`SELECT status, status_reason, ended_at FROM leases WHERE id = ?`).bind(id).first<{
-    status: string;
-    status_reason: string | null;
-    ended_at: number | null;
-  }>();
+  return env.DB.leases.findOne({ id });
 }
 
 async function cfIds(leaseId: string) {
-  const { results } = await env.DB.prepare(`SELECT cf_record_id FROM records WHERE lease_id = ? ORDER BY id`)
-    .bind(leaseId)
-    .all<{ cf_record_id: string | null }>();
+  const results = await env.DB.records.find({ lease_id: leaseId }).sort({ id: 1 }).toArray();
   return results.map((r) => r.cf_record_id);
 }
 
@@ -158,18 +152,14 @@ describe("POST /api/admin/users/:email/ban, unban", () => {
       body: { reason: "스팸" },
     });
     expect(res.status).toBe(200);
-    const body = await res.json<{ revokedLeases: string[]; failedLeases: string[] }>();
+    const body = (await res.json()) as { revokedLeases: string[]; failedLeases: string[] };
     expect(body.revokedLeases).toHaveLength(2);
     expect(body.failedLeases).toEqual([]);
 
-    const user = await env.DB.prepare(`SELECT banned_at, ban_reason FROM users WHERE email = ?`).bind(target.email).first<{
-      banned_at: number | null;
-      ban_reason: string | null;
-    }>();
+    const user = await env.DB.users.findOne({ email: target.email });
     expect(user?.banned_at).toBeTypeOf("number");
     expect(user?.ban_reason).toBe("스팸");
-    const sessions = await env.DB.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE email = ?`).bind(target.email).first<{ n: number }>();
-    expect(sessions?.n).toBe(0);
+    expect(await env.DB.sessions.countDocuments({ email: target.email })).toBe(0);
     expect((await call("/api/me", { session: target })).status).toBe(401);
 
     expect(await leaseRow(active)).toMatchObject({ status: "revoked", status_reason: "user_banned" });
@@ -185,7 +175,7 @@ describe("POST /api/admin/users/:email/ban, unban", () => {
 
   it("세션이 남아 있어도 차단된 사용자는 즉시 401", async () => {
     const target = await login(`b-${uid()}@ajou.ac.kr`);
-    await env.DB.prepare(`UPDATE users SET banned_at = ? WHERE email = ?`).bind(Date.now(), target.email).run();
+    await env.DB.users.updateOne({ email: target.email }, { $set: { banned_at: Date.now() } });
     expect((await call("/api/me", { session: target })).status).toBe(401);
   });
 
@@ -211,8 +201,8 @@ describe("POST /api/admin/users/:email/ban, unban", () => {
 
     const res = await call(`/api/admin/users/${encodeURIComponent(target)}/unban`, { method: "POST", session: admin, body: {} });
     expect(res.status).toBe(200);
-    const user = await env.DB.prepare(`SELECT banned_at, ban_reason FROM users WHERE email = ?`).bind(target).first();
-    expect(user).toEqual({ banned_at: null, ban_reason: null });
+    const user = await env.DB.users.findOne({ email: target });
+    expect(user).toMatchObject({ banned_at: null, ban_reason: null });
     expect((await leaseRow(leaseId))?.status).toBe("revoked");
     expect(await auditFor({ action: "admin.unban", targetEmail: target })).toHaveLength(1);
 
@@ -230,21 +220,23 @@ describe("조회 API", () => {
     await createLease({ name: `q${tag}-one`, owner, records: [{ type: "A", host: `q${tag}-one.${ZONE}`, content: "1.1.1.1" }] });
     await createLease({ name: `q${tag}-two`, owner, status: "revoked", endedAt: Date.now() });
 
-    const all = await (await call(`/api/admin/leases?q=${tag}`, { session: admin })).json<Paged<AdminLeaseItem>>();
+    const all = (await (await call(`/api/admin/leases?q=${tag}`, { session: admin })).json()) as Paged<AdminLeaseItem>;
     expect(all.total).toBe(2);
     expect(all.items.map((i) => i.name).sort()).toEqual([`q${tag}-one`, `q${tag}-two`]);
     expect(all.items.find((i) => i.name === `q${tag}-one`)?.records).toEqual([
       expect.objectContaining({ type: "A", content: "1.1.1.1", live: true }),
     ]);
 
-    const revoked = await (await call(`/api/admin/leases?q=${tag}&status=revoked`, { session: admin })).json<Paged<AdminLeaseItem>>();
+    const revoked = (await (await call(`/api/admin/leases?q=${tag}&status=revoked`, { session: admin })).json()) as Paged<AdminLeaseItem>;
     expect(revoked.items.map((i) => i.name)).toEqual([`q${tag}-two`]);
 
-    const byOwner = await (await call(`/api/admin/leases?q=${encodeURIComponent(owner)}`, { session: admin })).json<Paged<AdminLeaseItem>>();
+    const byOwner = (await (await call(`/api/admin/leases?q=${encodeURIComponent(owner)}`, { session: admin })).json()) as Paged<AdminLeaseItem>;
     expect(byOwner.total).toBe(2);
 
     // LIKE 와일드카드는 문자 그대로 취급
-    const wildcard = await (await call(`/api/admin/leases?q=${encodeURIComponent("%")}`, { session: admin })).json<Paged<AdminLeaseItem>>();
+    const regex = (await (await call(`/api/admin/leases?q=${encodeURIComponent(".*")}`, { session: admin })).json()) as Paged<AdminLeaseItem>;
+    expect(regex.total).toBe(0);
+    const wildcard = (await (await call(`/api/admin/leases?q=${encodeURIComponent("%")}`, { session: admin })).json()) as Paged<AdminLeaseItem>;
     expect(wildcard.total).toBe(0);
   });
 
@@ -259,13 +251,13 @@ describe("조회 API", () => {
     await createLease({ name: `u${tag}-2`, owner: normal, status: "suspended" });
     await createLease({ name: `u${tag}-3`, owner: normal, status: "expired", endedAt: Date.now() });
 
-    const list = await (await call(`/api/admin/users?q=usr-${tag}`, { session: admin })).json<Paged<AdminUserItem>>();
+    const list = (await (await call(`/api/admin/users?q=usr-${tag}`, { session: admin })).json()) as Paged<AdminUserItem>;
     expect(list.total).toBe(2);
     expect(list.items.find((u) => u.email === normal)).toMatchObject({ liveLeaseCount: 2, totalLeaseCount: 3, bannedAt: null });
 
-    const onlyBanned = await (await call(`/api/admin/users?q=usr-${tag}&banned=true`, { session: admin })).json<Paged<AdminUserItem>>();
+    const onlyBanned = (await (await call(`/api/admin/users?q=usr-${tag}&banned=true`, { session: admin })).json()) as Paged<AdminUserItem>;
     expect(onlyBanned.items.map((u) => u.email)).toEqual([banned]);
-    const notBanned = await (await call(`/api/admin/users?q=usr-${tag}&banned=false`, { session: admin })).json<Paged<AdminUserItem>>();
+    const notBanned = (await (await call(`/api/admin/users?q=usr-${tag}&banned=false`, { session: admin })).json()) as Paged<AdminUserItem>;
     expect(notBanned.items.map((u) => u.email)).toEqual([normal]);
   });
 
@@ -276,41 +268,163 @@ describe("조회 API", () => {
     const name = `al-${uid()}`;
     const leaseId = await createLease({ name, owner });
     const base = Date.UTC(2020, 0, 1);
-    const stmts = Array.from({ length: 30 }, (_, i) =>
-      env.DB.prepare(
-        `INSERT INTO audit_logs (at, actor_email, actor_role, action, lease_id, target_email, detail) VALUES (?, ?, 'user', ?, ?, ?, ?)`,
-      ).bind(base + i * 1000, owner, i % 2 ? "lease.renew" : "lease.update_records", leaseId, owner, JSON.stringify({ i })),
+    await env.DB.auditLogs.insertMany(
+      Array.from({ length: 30 }, (_, i) => ({
+        at: base + i * 1000,
+        actor_email: owner,
+        actor_role: "user" as const,
+        action: i % 2 ? ("lease.renew" as const) : ("lease.update_records" as const),
+        lease_id: leaseId,
+        target_email: owner,
+        detail: { i },
+        ip: null,
+        user_agent: null,
+      })),
     );
-    await env.DB.batch(stmts);
 
-    const page1 = await (await call(`/api/admin/audit-logs?lease=${name}`, { session: admin })).json<Paged<AuditLogItem>>();
+    const page1 = (await (await call(`/api/admin/audit-logs?lease=${name}`, { session: admin })).json()) as Paged<AuditLogItem>;
     expect(page1.total).toBe(30);
     expect(page1.items).toHaveLength(25);
     expect(page1.items[0]).toMatchObject({ leaseName: name, detail: { i: 29 } });
-    const page2 = await (await call(`/api/admin/audit-logs?lease=${name}&page=2`, { session: admin })).json<Paged<AuditLogItem>>();
+    const page2 = (await (await call(`/api/admin/audit-logs?lease=${name}&page=2`, { session: admin })).json()) as Paged<AuditLogItem>;
     expect(page2.items).toHaveLength(5);
 
-    const renew = await (await call(`/api/admin/audit-logs?lease=${leaseId}&action=lease.renew`, { session: admin })).json<Paged<AuditLogItem>>();
+    const renew = (await (await call(`/api/admin/audit-logs?lease=${leaseId}&action=lease.renew`, { session: admin })).json()) as Paged<AuditLogItem>;
     expect(renew.total).toBe(15);
 
-    const ranged = await (
+    const ranged = (await (
       await call(`/api/admin/audit-logs?actor=${encodeURIComponent(owner)}&from=${base + 10_000}&to=${base + 20_000}`, { session: admin })
-    ).json<Paged<AuditLogItem>>();
+    ).json()) as Paged<AuditLogItem>;
     expect(ranged.total).toBe(10);
   });
 
   it("GET /api/admin/drift: 결과 없으면 null, 있으면 최근 1건", async () => {
     const admin = await login(ADMIN_EMAIL);
-    await env.DB.prepare(`DELETE FROM reconcile_runs`).run();
-    const empty = await (await call("/api/admin/drift", { session: admin })).json<DriftResponse>();
+    await env.DB.reconcileRuns.deleteMany({});
+    const empty = (await (await call("/api/admin/drift", { session: admin })).json()) as DriftResponse;
     expect(empty.run).toBeNull();
 
     const items = [{ kind: "cf_only", type: "A", host: `ghost.${ZONE}`, leaseId: null, recordId: null, cfRecordId: "cf1", dbContent: null, cfContent: "1.1.1.1", dbProxied: null, cfProxied: false }];
-    await env.DB.batch([
-      env.DB.prepare(`INSERT INTO reconcile_runs (at, ok, drift_count, items) VALUES (?, 1, 0, '[]')`).bind(1000),
-      env.DB.prepare(`INSERT INTO reconcile_runs (at, ok, drift_count, items) VALUES (?, 1, 1, ?)`).bind(2000, JSON.stringify(items)),
+    await env.DB.reconcileRuns.insertMany([
+      { at: 1000, ok: 1, drift_count: 0, items: [], error: null, repaired: null },
+      { at: 2000, ok: 1, drift_count: 1, items: items as DriftItem[], error: null, repaired: null },
     ]);
-    const latest = await (await call("/api/admin/drift", { session: admin })).json<DriftResponse>();
+    const latest = (await (await call("/api/admin/drift", { session: admin })).json()) as DriftResponse;
     expect(latest.run).toMatchObject({ at: 2000, ok: true, driftCount: 1, items });
+  });
+});
+
+describe("회원 정보 삭제", () => {
+  const ORIGIN_EMAIL = () => `del-${uid()}@ajou.ac.kr`;
+  const liveRecord = (name: string) => [{ type: "A" as const, host: `${name}.${ZONE}`, content: "1.1.1.1" }];
+
+  /** 회원, 세션, 사용 중 lease, 감사 로그 한 건을 만든다. */
+  async function member() {
+    const email = ORIGIN_EMAIL();
+    const session = await login(email);
+    const name = `del-${uid()}`;
+    const leaseId = await createLease({ name, owner: email, records: liveRecord(name) });
+    await env.DB.auditLogs.insertOne({
+      at: 1,
+      actor_email: email,
+      actor_role: "user",
+      action: "lease.renew",
+      lease_id: leaseId,
+      target_email: email,
+      detail: { before: true },
+      ip: "203.0.113.1",
+      user_agent: "ua",
+    });
+    return { email, session, name, leaseId };
+  }
+
+  async function expectDeleted({ email, leaseId }: { email: string; leaseId: string }) {
+    expect(await env.DB.users.findOne({ email })).toBeNull();
+    expect(await env.DB.sessions.countDocuments({ email })).toBe(0);
+    // lease는 소유자 이메일을 그대로 두고, DNS 레코드는 내용을 남긴 채 Cloudflare 참조만 지운다.
+    expect(await leaseRow(leaseId)).toMatchObject({ owner_email: email, owner_deleted_at: expect.any(Number) });
+    expect(await env.DB.records.find({ lease_id: leaseId }).toArray()).toEqual([expect.objectContaining({ content: "1.1.1.1", cf_record_id: null })]);
+    // 감사 로그는 원래 내용 그대로 남는다.
+    expect(await env.DB.auditLogs.findOne({ lease_id: leaseId, at: 1 })).toMatchObject({
+      actor_email: email,
+      target_email: email,
+      detail: { before: true },
+      ip: "203.0.113.1",
+      user_agent: "ua",
+    });
+  }
+
+  it("DELETE /api/me: 탈퇴하면 회원 정보를 지우고 세션을 끊는다", async () => {
+    const m = await member();
+    const res = await call("/api/me", { method: "DELETE", session: m.session, body: { confirmEmail: m.email } });
+    expect(res.status).toBe(200);
+    expect((await leaseRow(m.leaseId))?.status).toBe("released");
+    await expectDeleted(m);
+    expect((await call("/api/me", { session: m.session })).status).toBe(401);
+    expect(await auditFor({ action: "user.withdraw", targetEmail: m.email })).toEqual([
+      expect.objectContaining({ actor_email: m.email, actor_role: "user", detail: { reason: null, leases: [m.name] } }),
+    ]);
+  });
+
+  it("탈퇴 확인 이메일이 다르면 400이고 아무것도 지우지 않는다", async () => {
+    const m = await member();
+    const res = await call("/api/me", { method: "DELETE", session: m.session, body: { confirmEmail: "other@ajou.ac.kr" } });
+    expect(res.status).toBe(400);
+    expect(await env.DB.users.findOne({ email: m.email })).not.toBeNull();
+    expect((await leaseRow(m.leaseId))?.status).toBe("active");
+  });
+
+  it("탈퇴에도 CSRF 검사를 한다", async () => {
+    const m = await member();
+    const res = await call("/api/me", { method: "DELETE", session: { ...m.session, csrf: "wrong" }, body: { confirmEmail: m.email } });
+    expect(res.status).toBe(403);
+    expect(await env.DB.users.findOne({ email: m.email })).not.toBeNull();
+  });
+
+  it("다시 로그인하면 예전 서브도메인이 보이지 않는다. 관리자에게는 보인다", async () => {
+    const m = await member();
+    await call("/api/me", { method: "DELETE", session: m.session, body: { confirmEmail: m.email } });
+    const again = await login(m.email);
+    expect(((await (await call("/api/leases", { session: again })).json()) as { items: unknown[] }).items).toEqual([]);
+    expect((await call(`/api/leases/${m.leaseId}`, { session: again })).status).toBe(404);
+    expect((await call(`/api/leases/${m.leaseId}`, { method: "DELETE", session: again })).status).toBe(404);
+    const admin = await login(ADMIN_EMAIL);
+    const listed = (await (await call(`/api/admin/leases?q=${m.name}`, { session: admin })).json()) as Paged<AdminLeaseItem>;
+    expect(listed.items[0]).toMatchObject({ ownerEmail: m.email, status: "released", records: [expect.objectContaining({ content: "1.1.1.1" })] });
+  });
+
+  it("탈퇴로 반납한 이름: 다른 사람은 보류, 다시 로그인한 본인은 신청 가능", async () => {
+    const m = await member();
+    await call("/api/me", { method: "DELETE", session: m.session, body: { confirmEmail: m.email } });
+    const avail = async (session: Session) => (await call(`/api/names/${m.name}/availability`, { session })).json();
+    expect(await avail(await login(ORIGIN_EMAIL()))).toEqual({ available: false, reason: "held" });
+    expect(await avail(await login(m.email))).toEqual({ available: true });
+  });
+
+  it("POST /api/admin/users/:email/delete: 관리자가 삭제하면 lease를 회수하고 회원 정보를 지운다", async () => {
+    const admin = await login(ADMIN_EMAIL);
+    const m = await member();
+    const res = await call(`/api/admin/users/${encodeURIComponent(m.email)}/delete`, { method: "POST", session: admin, body: { reason: "본인 요청" } });
+    expect(res.status).toBe(200);
+    expect((await leaseRow(m.leaseId))?.status).toBe("revoked");
+    await expectDeleted(m);
+    expect(await auditFor({ action: "admin.delete_user", targetEmail: m.email })).toEqual([
+      expect.objectContaining({ actor_email: ADMIN_EMAIL, actor_role: "admin", detail: { reason: "본인 요청", leases: [m.name] } }),
+    ]);
+  });
+
+  it("관리자 삭제: 사유 필수, 일반 회원 403, 자기 자신 400, 없는 사용자 404, 차단된 사용자 409", async () => {
+    const admin = await login(ADMIN_EMAIL);
+    const m = await member();
+    const del = (email: string, session = admin, body: unknown = { reason: "r" }) =>
+      call(`/api/admin/users/${encodeURIComponent(email)}/delete`, { method: "POST", session, body });
+    expect((await del(m.email, admin, {})).status).toBe(400);
+    expect((await del(m.email, m.session)).status).toBe(403);
+    expect((await del(ADMIN_EMAIL)).status).toBe(400);
+    expect((await del(`none-${uid()}@ajou.ac.kr`)).status).toBe(404);
+    const banned = ORIGIN_EMAIL();
+    await createUser(banned, { banned: true });
+    expect((await del(banned)).status).toBe(409);
+    expect(await env.DB.users.findOne({ email: banned })).not.toBeNull();
   });
 });

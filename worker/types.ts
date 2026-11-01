@@ -1,4 +1,4 @@
-import type { Config } from "./env";
+import type { Config, Env } from "./env";
 
 export interface SessionInfo {
   idHash: string;

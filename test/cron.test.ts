@@ -1,23 +1,33 @@
-import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from "cloudflare:test";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { CRON_DAILY, CRON_HEALTH } from "../worker/cron";
-import worker from "../worker/index";
+import { CRON_DAILY, CRON_HEALTH, CRON_SCHEDULES, type CronJob } from "../worker/cron";
+import { handleScheduled } from "../worker/index";
+import { env } from "./env";
 import { call, login, uid } from "./helpers";
 
+const JOB_BY_CRON = Object.fromEntries(Object.entries(CRON_SCHEDULES).map(([job, cron]) => [cron, job as CronJob]));
+
 async function runCron(cron: string) {
-  const ctx = createExecutionContext();
-  await worker.scheduled(createScheduledController({ cron, scheduledTime: Date.now() }), env, ctx);
-  await waitOnExecutionContext(ctx);
+  await handleScheduled(JOB_BY_CRON[cron]!, env);
 }
 
 async function expireSession(email: string, expiresAt: number) {
-  await env.DB.prepare(`UPDATE sessions SET expires_at = ? WHERE email = ?`).bind(expiresAt, email).run();
+  await env.DB.sessions.updateMany({ email }, { $set: { expires_at: expiresAt } });
 }
 
 async function sessionCount(email: string) {
-  const row = await env.DB.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE email = ?`).bind(email).first<{ n: number }>();
-  return row?.n ?? 0;
+  return env.DB.sessions.countDocuments({ email });
 }
+
+describe("cron: Netlify 예약 함수 일정", () => {
+  for (const [job, cron] of Object.entries(CRON_SCHEDULES)) {
+    it(`netlify/functions/cron-${job}.ts의 schedule은 ${cron}`, () => {
+      const source = readFileSync(new URL(`../netlify/functions/cron-${job}.ts`, import.meta.url), "utf8");
+      expect(source).toContain(`schedule: "${cron}"`);
+      expect(source).toContain(`handleScheduled("${job}"`);
+    });
+  }
+});
 
 describe("cron: 만료 세션 삭제", () => {
   it(`${CRON_DAILY}: 만료된 세션만 삭제하고 유효한 세션은 남긴다`, async () => {
@@ -80,25 +90,17 @@ function fakeDeps(opts: { resolves: boolean; http?: () => Response; tcp?: (host:
 }
 
 async function lease(id: string) {
-  return env.DB.prepare(`SELECT * FROM leases WHERE id = ?`).bind(id).first<{
-    status: string;
-    status_reason: string | null;
-    health_fail_count: number;
-    last_health_check_at: number | null;
-    last_health_ok_at: number | null;
-    suspended_at: number | null;
-    ended_at: number | null;
-  }>();
+  return env.DB.leases.findOne({ id });
 }
 
 async function cfIds(leaseId: string) {
-  const { results } = await env.DB.prepare(`SELECT cf_record_id FROM records WHERE lease_id = ?`).bind(leaseId).all<{ cf_record_id: string | null }>();
+  const results = await env.DB.records.find({ lease_id: leaseId }).toArray();
   return results.map((r) => r.cf_record_id);
 }
 
 /** 다른 테스트의 lease가 배치(10개)를 차지하지 않도록 기존 active lease의 검사 시각을 미래로 민다. */
 async function isolateHealthBatch(now: number) {
-  await env.DB.prepare(`UPDATE leases SET last_health_check_at = ? WHERE status = 'active'`).bind(now + 365 * DAY).run();
+  await env.DB.leases.updateMany({ status: "active" }, { $set: { last_health_check_at: now + 365 * DAY } });
 }
 
 describe("헬스 판정 (services/health.ts)", () => {
@@ -167,7 +169,7 @@ describe("cron: 헬스체크 실패 누적 → suspend → recheck 복구", () =
     expect(await lease(id)).toMatchObject({ status: "active", health_fail_count: 6 });
 
     // 같은 날 다시 검사해도(24시간 제한을 우회해도) 실패 횟수와 감사 로그는 늘지 않는다
-    await env.DB.prepare(`UPDATE leases SET last_health_check_at = NULL WHERE id = ?`).bind(id).run();
+    await env.DB.leases.updateOne({ id }, { $set: { last_health_check_at: null } });
     await runHealthChecks(env.DB, dns, config(), at(5) + 60_000, deps);
     expect((await lease(id))?.health_fail_count).toBe(6);
     expect(await auditFor({ action: "system.health_fail", leaseId: id })).toHaveLength(6);
@@ -181,7 +183,7 @@ describe("cron: 헬스체크 실패 누적 → suspend → recheck 복구", () =
 
     // 소유자 재확인: 대상이 다시 응답하면 레코드 재생성 + active
     // (위 검사 시각이 미래로 잡혀 있으므로 재확인 쿨다운에 걸리지 않게 지운다)
-    await env.DB.prepare(`UPDATE leases SET last_health_check_at = NULL WHERE id = ?`).bind(id).run();
+    await env.DB.leases.updateOne({ id }, { $set: { last_health_check_at: null } });
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.startsWith(DOH_URL)) return dohJson(true);
@@ -297,7 +299,7 @@ describe("cron: 드리프트 점검", () => {
 
   it("안전한 드리프트는 자동 복구하고, Cloudflare에만 있는 레코드는 보고만 한다", async () => {
     const cf = fakeCloudflare(vi.spyOn(globalThis, "fetch"));
-    const dns = createDnsClient(parseConfig({ ...env, ...LIVE_DNS } as unknown as Env));
+    const dns = createDnsClient(parseConfig({ ...env, ...LIVE_DNS }));
     const owner = `dr-${uid()}@ajou.ac.kr`;
     const put = (id: string, content: string, leaseId: string) =>
       cf.records.set(id, { id, type: "A", name: `d.${ZONE}`, content, proxied: false, comment: `bcd:lease=${leaseId}` });
@@ -317,20 +319,20 @@ describe("cron: 드리프트 점검", () => {
     const r = await runReconcile(env.DB, dns, at);
     expect(r.ok).toBe(true);
 
-    const goneRow = (await env.DB.prepare(`SELECT cf_record_id FROM records WHERE lease_id = ?`).bind(gone).first<{ cf_record_id: string }>())!;
-    expect(cf.records.get(goneRow.cf_record_id)).toMatchObject({ content: "3.3.3.3", comment: `bcd:lease=${gone}` });
+    const goneRow = (await env.DB.records.findOne({ lease_id: gone }))!;
+    expect(cf.records.get(goneRow.cf_record_id!)).toMatchObject({ content: "3.3.3.3", comment: `bcd:lease=${gone}` });
     expect(cf.records.get("cf-edited")?.content).toBe("3.3.3.3");
     expect(cf.records.has("cf-ended")).toBe(false);
-    expect(await env.DB.prepare(`SELECT cf_record_id FROM records WHERE lease_id = ?`).bind(ended).first()).toEqual({ cf_record_id: null });
+    expect(await env.DB.records.findOne({ lease_id: ended })).toMatchObject({ cf_record_id: null });
     expect(cf.records.has("cf-orphan")).toBe(true);
     expect(cf.calls).not.toContain("DELETE cf-orphan");
 
-    const run = await env.DB.prepare(`SELECT * FROM reconcile_runs WHERE at = ?`).bind(at).first<{ drift_count: number; items: string; repaired: string }>();
-    const items = JSON.parse(run!.items) as Array<{ kind: string; leaseId: string | null }>;
+    const run = await env.DB.reconcileRuns.findOne({ at });
+    const items = run!.items;
     // 복구 후 다시 비교한 결과만 남는다
     expect(items).toEqual([expect.objectContaining({ kind: "cf_only", leaseId: "deleted" })]);
     expect(run!.drift_count).toBe(1);
-    const repaired = JSON.parse(run!.repaired) as { leases: Array<{ leaseId: string }> };
+    const repaired = run!.repaired!;
     expect(repaired.leases.map((l) => l.leaseId)).toEqual(expect.arrayContaining([gone, edited, ended]));
     expect(await auditFor({ action: "system.dns_repair", leaseId: gone })).toEqual([
       expect.objectContaining({ actor_role: "system", detail: expect.objectContaining({ recreated: 1 }) }),
@@ -344,7 +346,7 @@ describe("cron: 드리프트 점검", () => {
     await createLease({ name: `dd-${uid()}`, owner: `dd-${uid()}@ajou.ac.kr`, records: [{ type: "A", host: `d.${ZONE}`, content: "3.3.3.3" }] });
     const at = Date.now() + 5 * 365 * DAY + 1;
     await runReconcile(env.DB, dryDns(), at);
-    const run = await env.DB.prepare(`SELECT repaired, error FROM reconcile_runs WHERE at = ?`).bind(at).first();
+    const run = await env.DB.reconcileRuns.findOne({ at });
     expect(run).toMatchObject({ repaired: null, error: expect.stringContaining("DNS_DRY_RUN") });
   });
 
@@ -352,7 +354,7 @@ describe("cron: 드리프트 점검", () => {
     const dns = { ...dryDns(), dryRun: false, listManaged: async () => Promise.reject(new Error("down")) } as DnsClient;
     const at = Date.now() + 6 * 365 * DAY;
     expect(await runReconcile(env.DB, dns, at)).toEqual({ ok: false, driftCount: 0 });
-    const run = await env.DB.prepare(`SELECT ok, error FROM reconcile_runs WHERE at = ?`).bind(at).first();
+    const run = await env.DB.reconcileRuns.findOne({ at });
     expect(run).toMatchObject({ ok: 0, error: expect.any(String) });
   });
 });

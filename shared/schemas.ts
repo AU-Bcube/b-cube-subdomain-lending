@@ -12,8 +12,13 @@ export const meResponseSchema = z.object({
   /** 서브도메인이 붙는 존 이름 (예: b-cube.kr) */
   zone: z.string(),
   limits: z.object({ max: z.number().int(), used: z.number().int() }),
+  /** B-CUBE IdP 동의 관리 주소. IdP를 설정하지 않은 개발 모드에서는 null */
+  consentUrl: z.string().nullable(),
 });
 export type MeResponse = z.infer<typeof meResponseSchema>;
+
+/** 회원 탈퇴 확인: 본인 이메일을 그대로 보낸다 */
+export const withdrawSchema = z.object({ confirmEmail: z.string().trim().toLowerCase().max(320) });
 
 export const devConfigSchema = z.object({
   fakeLogin: z.boolean(),
@@ -77,6 +82,8 @@ export const AUDIT_ACTIONS = [
   "system.drift_detected",
   "system.dns_repair",
   "admin.dns_recover",
+  "user.withdraw",
+  "admin.delete_user",
 ] as const;
 export type AuditAction = (typeof AUDIT_ACTIONS)[number];
 export type ActorRole = "user" | "admin" | "system";
@@ -136,7 +143,7 @@ export interface AdminUserItem {
 }
 
 export interface AuditLogItem {
-  id: number;
+  id: string;
   at: number;
   actorEmail: string | null;
   actorRole: ActorRole;
@@ -182,7 +189,7 @@ export interface PendingDnsOp {
 
 export interface DriftResponse {
   run: {
-    id: number;
+    id: string;
     at: number;
     ok: boolean;
     driftCount: number;
@@ -232,7 +239,7 @@ export interface LeaseItem {
 
 /** 소유자에게 보여주는 감사 로그. 작업자 이메일과 IP는 노출하지 않는다. */
 export interface LeaseAuditItem {
-  id: number;
+  id: string;
   at: number;
   actorRole: ActorRole;
   action: AuditAction;

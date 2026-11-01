@@ -1,9 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import { cloudflare } from "@cloudflare/vite-plugin";
+import { netlifyFunctions } from "./scripts/vite-functions";
 
 export default defineConfig({
-  plugins: [react(), cloudflare()],
+  // netlifyFunctions(): dev/preview 서버에서 /api/*, /auth/*를 Netlify 함수로 보내고 .env를 읽는다.
+  plugins: [react(), netlifyFunctions()],
   // APP_ORIGIN(http://localhost:5173)과 Origin 검사를 맞추기 위해 dev/preview 모두 5173을 쓴다.
   server: { port: 5173, strictPort: true },
   preview: { allowedHosts: ["0.tcp.jp.ngrok.io"], port: 5173, strictPort: true },

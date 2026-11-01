@@ -70,7 +70,8 @@ Discovery: {ISSUER}/.well-known/openid-configuration 을 먼저 읽어 아래 �
 | 토큰 수명 | id_token, access_token 모두 5분. refresh_token 없음. id_token을 검증한 뒤 이 서비스의 자체 세션을 만든다 |
 | 인가 응답 | `code`, `state`, `iss`가 온다. `iss`가 issuer와 같은지 확인한다(RFC 9207) |
 | redirect_uri | 등록한 값과 글자 하나까지 같아야 한다. https만(localhost는 http 허용) |
-| 동의 | IdP가 로그인할 때마다 동의 화면을 띄운다. `prompt=none`은 `login_required`로 거절된다 |
+| 동의 | IdP가 동의를 1년간 기억한다. 동의한 scope 안에서 다시 로그인하면 동의 화면 없이 돌아온다. 다시 묻게 하려면 `prompt=consent`를 붙인다(이때 사용자가 거부하면 동의가 철회된다). Google 로그인은 매번 거치며 `prompt=none`은 `login_required`로 거절된다 |
+| 동의 철회 | 사용자는 `{ISSUER}/consents`에서 SP별로 제공 항목을 보고 동의를 철회한다. 철회해도 이 서비스의 세션은 끊기지 않고, 다음 로그인 때 동의 화면이 다시 나온다. 이미 받은 정보는 IdP가 지우지 않는다 |
 
 id_token 검증 항목: 서명(JWKS, ES256만 허용), `iss` = issuer, `aud` = client_id, `exp`, `nonce`(보냈으면).
 
@@ -85,8 +86,9 @@ scope와 클레임:
 | `sohakoe` | `sohakoe_memberships: [{ name, year, semester, from, to }]` |
 
 - `student`, `sohakoe`는 관리자 승인이 있어야 쓸 수 있다. 승인 전이거나 중지된 SP로 로그인하면 IdP가 자기 오류 화면을 띄우고 이 서비스로 돌아오지 않는다.
-- id_token에는 `hd` 클레임이 없다. IdP가 이미 학교 Workspace 계정만 통과시키므로, 기존 hd 검사는 IdP issuer일 때 빼라.
+- id_token에는 `hd` 클레임이 없다. IdP가 이미 학교 Workspace 계정만 통과시키므로, 기존 hd 검사(`REQUIRE_HD` 같은 설정 포함)는 IdP issuer일 때 빼라.
   대신 `email`이 `@ajou.ac.kr`로 끝나는지는 방어적으로 한 번 더 확인해도 된다.
+- 인가 요청에 Google 전용 파라미터(`hd`, `prompt=select_account`, `access_type` 등)를 붙이지 마라. IdP가 Google에 직접 붙이고, SP가 보낸 값은 무시한다.
 
 콜백에서 처리할 오류(`error` 쿼리):
 
@@ -100,6 +102,9 @@ scope와 클레임:
 인가 코드는 60초 안에 한 번만 쓸 수 있다.
 
 로그아웃: IdP에는 로그아웃 엔드포인트가 없고 IdP 세션도 없다. 이 서비스의 세션만 끊으면 된다.
+
+동의 철회 안내: 이 서비스의 개인정보 안내나 계정 화면에 "B-CUBE 통합 로그인 동의 관리: {ISSUER}/consents" 링크를 넣어라.
+사용자가 이 서비스에 넘어온 정보의 삭제를 요청하면 이 서비스가 처리해야 한다. 지금 그런 절차가 없으면 나에게 알려라.
 
 # 클라이언트 등록
 
@@ -127,11 +132,12 @@ scope와 클레임:
 - 사용자 식별은 `sub`를 기준으로 하고, 기존 사용자 연결에만 email을 쓴다. 학생 정보 클레임은 필요한 것만 저장한다.
   학번 외의 학적 정보를 저장해야 하면 나에게 먼저 묻는다.
 - 기존 Google OAuth를 쓰던 서비스라면 IdP `sub`가 Google `sub`와 같은 값이므로 기존 google_sub와 그대로 이어진다.
+  전환 후에는 이 서비스의 Google OAuth 클라이언트와 관련 환경 변수가 필요 없다. 클라이언트 삭제는 내가 손으로 할 일로 보고하라.
   단, 로컬 IdP의 개발용 가짜 로그인은 `dev-<email>` 형태의 sub를 준다.
 - 개발용 가짜 로그인 같은 기존 개발 편의 기능이 있으면 유지하되, 운영에서 켜지지 않게 하는 안전장치도 유지한다.
 - 자체 인증 코드(비밀번호 해시, 회원가입, 재설정 메일)는 내가 정한 방식대로 비활성화하거나 지운다.
   지운 기능을 가리키는 화면, 라우트, 환경 변수, 문서도 함께 정리한다.
-- 문서(README, 설정 가이드)에 IdP 연동 방법, 환경 변수, 로컬 개발 방법을 적는다.
+- 문서(README, 설정 가이드)에 IdP 연동 방법, 환경 변수, 로컬 개발 방법, 동의 철회 주소(`{ISSUER}/consents`)를 적는다.
 
 # 테스트
 

@@ -10,9 +10,8 @@
 
 - [ ] `dash.cloudflare.com` → **b-cube.kr** 존 → 우측 하단 **API** 영역에서 다음 값을 복사해 둡니다.
   - **Zone ID** → `CF_ZONE_ID`
-  - **Account ID** → `wrangler.jsonc`의 `account_id`
 - [ ] **DNS → Records**에서 현재 레코드를 확인합니다.
-  - [ ] `domain.b-cube.kr` 레코드가 **없어야** 합니다. 있으면 삭제하세요. Worker 커스텀 도메인이 자동으로 생성합니다.
+  - [ ] `domain.b-cube.kr` 레코드는 Netlify 사이트를 가리키는 CNAME(`<site>.netlify.app`, **DNS only**) 하나여야 합니다. 예전 Workers 커스텀 도메인 레코드가 남아 있으면 지우고 새로 만드세요(README 배포 절차 6단계).
   - [ ] 이미 쓰고 있는 서브도메인 이름(예: `www`, 메인 사이트, 메일 관련)을 메모해 두세요. 이 이름들은 SPEC의 예약어 목록(`RESERVED_NAMES`)에 추가합니다.
   - [ ] 레코드가 많지 않다면 **Export**로 백업 파일을 받아 둡니다.
 - [ ] 존 개요나 DNS 설정 화면에서 **플랜(Free)과 DNS 레코드 개수 한도**를 확인하고 메모합니다.
@@ -36,7 +35,7 @@
     - `Zone` / `DNS` / `Edit`
     - `Zone` / `Zone` / `Read`
   - **Zone Resources**: `Include` / `Specific zone` / `b-cube.kr` (**All zones 선택 금지**)
-  - **Client IP Address Filtering**: 비워 둡니다. Workers의 출구 IP는 고정되지 않기 때문입니다.
+  - **Client IP Address Filtering**: 비워 둡니다. Netlify Functions의 출구 IP는 고정되지 않기 때문입니다.
   - **TTL**: 만료일을 두려면 1년 정도로 정하고, 캘린더에 갱신 알림을 등록하세요.
 - [ ] 생성 후 표시되는 토큰을 **한 번만** 복사해 안전한 곳에 보관합니다 → `CF_API_TOKEN`
 - [ ] 같은 페이지의 토큰 **Verify** 안내 명령으로 토큰이 유효한지 확인합니다(선택).
@@ -45,32 +44,36 @@
 
 > 이 서비스는 Google OAuth 클라이언트를 직접 쓰지 않습니다. 로그인은 B-CUBE IdP(`https://id.b-cube.kr`)가 처리합니다. 기존 Google 클라이언트(`bcube-domain` 프로젝트)는 전환 후 삭제합니다.
 
-- [x] 등록 토큰으로 클라이언트를 동적 등록합니다(RFC 7591, 2026-10-30 완료). `client_id`는 `dyn-f6c226535e6a490f8ff1`이고, `redirect_uris`는 운영과 `http://localhost:5173/auth/callback`, scope는 `openid email profile student sohakoe`입니다.
+- [x] 등록 토큰으로 클라이언트를 동적 등록합니다(RFC 7591, 2026-11-01 다시 등록). `client_id`는 `dyn-8919b43990d5418f9047`이고, `redirect_uris`는 운영과 `http://localhost:5173/auth/callback`, scope는 `openid email profile sohakoe`입니다.
+- [ ] 쓰지 않는 예전 클라이언트 `dyn-f6c226535e6a490f8ff1`를 삭제합니다(`student` scope 포함). 관리자에게 요청하거나, 그때 받은 `registration_access_token`이 있으면 `registration_client_uri`에 DELETE 합니다.
+- [ ] 2026-11-01에 쓴 등록 토큰(`iat_...`)이 대화 기록에 남았으므로 관리자에게 폐기를 요청합니다.
 - [ ] IdP 관리자가 클라이언트를 승인할 때까지 기다립니다(`b_cube_status: pending`). 승인 전에는 로그인할 수 없습니다.
-- [ ] 등록 응답의 `client_secret`을 `IDP_CLIENT_SECRET`으로 입력합니다(6번). `IDP_CLIENT_ID`는 `wrangler.jsonc`에 반영했습니다.
-- [ ] 등록 응답의 `client_secret`과 `registration_access_token`은 다시 받을 수 없으므로 비밀번호 관리자에 옮기고, 응답 파일을 지웁니다. 등록 토큰(`iat_...`)은 `wrangler.jsonc` 같은 설정 파일에 넣지 않습니다.
+- [x] 등록 응답의 `client_secret`을 로컬 `.env`의 `IDP_CLIENT_SECRET`에 넣었습니다(2026-11-01). `IDP_CLIENT_ID`는 `worker/runtime.ts`와 `.env`에 반영했습니다. 운영은 Netlify 환경 변수에 넣습니다(6번).
+- [ ] `client_secret`과 `registration_access_token`은 다시 받을 수 없습니다. 지금은 `.env`에만 있으므로 비밀번호 관리자에도 옮깁니다. 응답 파일은 지웠습니다. 등록 토큰(`iat_...`)은 `wrangler.jsonc` 같은 설정 파일에 넣지 않습니다.
 
 ## 5. 로컬 개발 환경
 
 - [ ] Node.js **20 이상**이 설치되어 있는지 확인합니다(`node -v`).
-- [ ] 프로젝트 폴더에서 `npx wrangler login`을 실행하면 브라우저가 열립니다. Cloudflare 계정으로 승인하세요.
-  - 이 로그인은 배포·D1 생성용입니다. DNS 조작용 토큰(3번)과는 **별개**입니다.
+- [ ] Netlify CLI(`npm i -g netlify-cli`)를 설치하고 `netlify login`을 실행합니다. 배포·환경 변수 입력용입니다.
+- [ ] MongoDB Atlas 클러스터와 DB 사용자를 만들고 Network Access를 설정합니다. 접속 문자열은 `.env`와 Netlify 환경 변수(Secret)에만 넣습니다.
+  - 두 로그인 모두 DNS 조작용 Cloudflare 토큰(3번)과는 **별개**입니다.
 - [ ] 관리자 이메일 목록을 정합니다 → `ADMIN_EMAILS=a@ajou.ac.kr,b@ajou.ac.kr`
 
 ## 6. 시크릿 입력 (Claude Code가 프로젝트 골격을 만든 뒤)
 
 > 시크릿 값은 Claude Code 대화창에 붙여 넣지 말고 **직접** 입력하세요.
 
-- [ ] 로컬 개발용: `cp .dev.vars.example .dev.vars`로 복사합니다. 기본값만으로 가짜 로그인 + dry-run이 동작합니다. `.gitignore`에 포함되어 있는지 확인하세요.
-  - 실제 IdP 로그인을 시험할 때만 `IDP_CLIENT_ID`/`IDP_CLIENT_SECRET`을 채웁니다.
+- [ ] 로컬 개발용: `cp .env.example .env`로 복사합니다. 기본값만으로 가짜 로그인 + dry-run이 동작합니다. `.gitignore`에 포함되어 있는지 확인하세요.
+  - 실제 IdP 로그인을 시험할 때만 `IDP_CLIENT_SECRET`을 채웁니다.
   - `DNS_DRY_RUN=true`는 유지하고, 실제 DNS 변경 테스트는 마지막에만 합니다.
 - [ ] 로컬 UI 확인: `npm run db:reset` → `npm run dev` → `http://localhost:5173` 로그인 화면 하단의 페르소나 버튼(일반/한도 도달/신규/관리자/차단)으로 각 화면을 확인합니다.
-- [ ] 운영용: 터미널에서 직접 실행합니다.
+- [ ] 운영용: 터미널에서 직접 실행합니다(README 배포 절차 4단계).
   ```bash
-  npx wrangler secret put IDP_CLIENT_SECRET
-  npx wrangler secret put CF_API_TOKEN
+  netlify env:set IDP_CLIENT_SECRET "..." --secret
+  netlify env:set CF_API_TOKEN "..." --secret
+  netlify env:set DB_CONNECTION_STRING "..." --secret
   ```
-- [ ] `IDP_CLIENT_ID`, `CF_ZONE_ID`, `ADMIN_EMAILS` 등 비밀이 아닌 값은 `wrangler.jsonc`의 `vars`에 들어가는지 확인합니다.
+- [ ] `DB_NAME`, `CF_ZONE_ID`, `ADMIN_EMAILS`도 Netlify 환경 변수로 넣습니다. `IDP_ISSUER`, `IDP_CLIENT_ID` 등 그 밖의 기본값은 `worker/runtime.ts`의 `DEFAULT_VARS`에 있습니다.
 
 ## 7. 소학회 이름 확인 (운영 전환 전)
 
@@ -98,7 +101,7 @@
 - [ ] 4번째 서브도메인 생성이 차단되는지 확인합니다(1인당 한도 3개).
 - [ ] 관리자 계정으로 `/admin`에 들어가 강제 회수, 사용자 차단, 감사 로그를 확인합니다.
 - [ ] 일반 계정으로 `/admin`과 `/api/admin/*`에 접근하면 403이 나는지 확인합니다.
-- [ ] Workers 대시보드 → 해당 Worker → **Triggers**에 Cron이 등록되어 있는지 확인합니다.
+- [ ] Netlify → **Logs → Functions**에 `cron-health`, `cron-daily`, `cron-drift`가 **Scheduled**로 표시되는지 확인합니다.
 - [ ] 테스트 서브도메인을 삭제한 뒤 Cloudflare DNS에서도 사라졌는지 확인합니다.
 
 ## 9. 운영 중 정기 작업
@@ -106,5 +109,5 @@
 - [ ] 월 1회: `/admin`의 **드리프트** 탭을 확인합니다. 자동 복구 후 남은 항목(주로 "Cloudflare에만 있음")과 "끝나지 않은 DNS 작업"을 정리하세요.
 - [ ] 운영 규칙: comment가 `bcd:lease=`인 레코드는 Cloudflare 대시보드에서 직접 고치지 않습니다. 직접 고친 값은 자동 복구로 되돌아갑니다.
 - [ ] 학기 초: 졸업·탈퇴 회원의 임대를 회수하고, 관리자 이메일 목록(`ADMIN_EMAILS`)을 갱신합니다.
-- [ ] Cloudflare API 토큰 만료 전에 재발급하고 `wrangler secret put CF_API_TOKEN`으로 교체합니다.
+- [ ] Cloudflare API 토큰 만료 전에 재발급하고 `netlify env:set CF_API_TOKEN "..." --secret`으로 교체한 뒤 다시 배포합니다.
 - [ ] 피싱이나 남용 신고가 들어오면 → 관리자 강제 회수 + 사용자 차단. 사유는 감사 로그에 기록됩니다.

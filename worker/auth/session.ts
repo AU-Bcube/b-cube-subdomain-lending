@@ -29,11 +29,13 @@ export async function createSession(c: Context<HonoEnv>, email: string): Promise
   const token = randomToken(32);
   const idHash = await sha256Hex(token);
   const now = Date.now();
-  await c.env.DB.prepare(
-    `INSERT INTO sessions (id_hash, email, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`,
-  )
-    .bind(idHash, email, randomToken(32), now, now + SESSION_TTL_MS)
-    .run();
+  await c.env.DB.sessions.insertOne({
+    id_hash: idHash,
+    email,
+    csrf_token: randomToken(32),
+    created_at: now,
+    expires_at: now + SESSION_TTL_MS,
+  });
   setCookie(c, sessionCookieName(config), token, cookieOptions(config, SESSION_TTL_MS / 1000));
 }
 
@@ -41,34 +43,24 @@ export async function loadSession(c: Context<HonoEnv>): Promise<SessionInfo | nu
   const token = getCookie(c, sessionCookieName(c.var.config));
   if (!token || token.length > 128) return null;
   const idHash = await sha256Hex(token);
-  const row = await c.env.DB.prepare(
-    `SELECT s.id_hash, s.email, s.csrf_token, s.expires_at, u.name, u.banned_at
-       FROM sessions s JOIN users u ON u.email = s.email
-      WHERE s.id_hash = ? AND s.expires_at > ?`,
-  )
-    .bind(idHash, Date.now())
-    .first<{
-      id_hash: string;
-      email: string;
-      csrf_token: string;
-      expires_at: number;
-      name: string | null;
-      banned_at: number | null;
-    }>();
+  const db = c.env.DB;
+  const row = await db.sessions.findOne({ id_hash: idHash, expires_at: { $gt: Date.now() } });
   if (!row) return null;
+  const user = await db.users.findOne({ email: row.email });
+  if (!user) return null;
   return {
     idHash: row.id_hash,
     email: row.email,
-    name: row.name,
+    name: user.name,
     csrfToken: row.csrf_token,
     expiresAt: row.expires_at,
-    bannedAt: row.banned_at,
+    bannedAt: user.banned_at,
   };
 }
 
 export async function destroySession(c: Context<HonoEnv>, session: SessionInfo | null): Promise<void> {
   if (session) {
-    await c.env.DB.prepare(`DELETE FROM sessions WHERE id_hash = ?`).bind(session.idHash).run();
+    await c.env.DB.sessions.deleteOne({ id_hash: session.idHash });
   }
   clearSessionCookie(c);
 }

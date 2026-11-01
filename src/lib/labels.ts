@@ -33,6 +33,8 @@ export const AUDIT_ACTION_LABELS: Record<AuditAction, string> = {
   "admin.revoke": "강제 회수",
   "admin.ban": "사용자 차단",
   "admin.unban": "차단 해제",
+  "user.withdraw": "회원 탈퇴",
+  "admin.delete_user": "회원 정보 삭제",
   "system.drift_detected": "드리프트 감지",
   "system.dns_repair": "DNS 자동 복구",
   "admin.dns_recover": "DNS 작업 수동 복구",

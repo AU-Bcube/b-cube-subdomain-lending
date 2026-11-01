@@ -1,10 +1,12 @@
 /**
  * 통합 테스트 픽스처. 로컬 시드(scripts/seed.ts)와 독립적이다.
  */
-import { createExecutionContext, env, SELF, waitOnExecutionContext } from "cloudflare:test";
-import worker from "../worker/index";
 import type { LeaseStatus, RecordType, TargetKind } from "../shared/rules";
+import type { AuditAction } from "../shared/schemas";
 import { randomToken, sha256Hex } from "../worker/auth/crypto";
+import type { Env, VarName } from "../worker/env";
+import { handleRequest } from "../worker/index";
+import { env, SELF } from "./env";
 
 export const ORIGIN = "http://localhost:5173";
 export const ADMIN_EMAIL = "t-admin@ajou.ac.kr";
@@ -17,12 +19,16 @@ export function uid(): string {
 
 export async function createUser(email: string, opts: { banned?: boolean; name?: string } = {}): Promise<void> {
   const now = Date.now();
-  await env.DB.prepare(
-    `INSERT INTO users (email, idp_sub, name, first_login_at, last_login_at, banned_at, ban_reason)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  )
-    .bind(email, `sub-${email}`, opts.name ?? null, now, now, opts.banned ? now : null, opts.banned ? "테스트 차단" : null)
-    .run();
+  await env.DB.users.insertOne({
+    email,
+    idp_sub: `sub-${email}`,
+    name: opts.name ?? null,
+    sohakoe_memberships: [],
+    first_login_at: now,
+    last_login_at: now,
+    banned_at: opts.banned ? now : null,
+    ban_reason: opts.banned ? "테스트 차단" : null,
+  });
 }
 
 export interface Session {
@@ -33,28 +39,21 @@ export interface Session {
 
 /** 사용자를 만들고(없으면) 세션을 직접 넣는다. */
 export async function login(email: string): Promise<Session> {
-  const exists = await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(email).first();
+  const exists = await env.DB.users.findOne({ email });
   if (!exists) await createUser(email);
   const token = randomToken(32);
   const csrf = randomToken(32);
   const now = Date.now();
-  await env.DB.prepare(`INSERT INTO sessions (id_hash, email, csrf_token, created_at, expires_at) VALUES (?, ?, ?, ?, ?)`)
-    .bind(await sha256Hex(token), email, csrf, now, now + 7 * DAY)
-    .run();
+  await env.DB.sessions.insertOne({ id_hash: await sha256Hex(token), email, csrf_token: csrf, created_at: now, expires_at: now + 7 * DAY });
   return { email, cookie: `bcd_session=${token}`, csrf };
 }
 
 export type WorkerFetch = (req: Request) => Promise<Response>;
 
-/** env 값을 바꿔 Worker를 직접 호출한다(설정별 라우트 등록·안전장치·live DNS 모드 확인용). */
-export function workerWith(overrides: Partial<Record<keyof Env, string>>): WorkerFetch {
-  const variant = { ...env, ...overrides } as unknown as Env;
-  return async (req: Request) => {
-    const ctx = createExecutionContext();
-    const res = await worker.fetch(req as Request<unknown, IncomingRequestCfProperties>, variant, ctx);
-    await waitOnExecutionContext(ctx);
-    return res;
-  };
+/** env 값을 바꿔 요청 핸들러를 직접 호출한다(설정별 라우트 등록·안전장치·live DNS 모드 확인용). */
+export function workerWith(overrides: Partial<Record<VarName, string>>): WorkerFetch {
+  const variant: Env = { ...env, ...overrides };
+  return (req: Request) => handleRequest(req, variant);
 }
 
 export async function call(
@@ -109,64 +108,54 @@ export async function createLease(opts: {
   lastHealthCheckAt?: number | null;
   records?: FixtureRecord[];
 }): Promise<string> {
-  const owner = await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(opts.owner).first();
+  const owner = await env.DB.users.findOne({ email: opts.owner });
   if (!owner) await createUser(opts.owner);
   const id = crypto.randomUUID();
   const now = opts.createdAt ?? Date.now();
-  const stmts = [
-    env.DB.prepare(
-      `INSERT INTO leases (id, name, owner_email, target_kind, status, created_at, expires_at, ended_at, suspended_at,
-                           health_fail_count, last_health_check_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      id,
-      opts.name,
-      opts.owner,
-      opts.kind ?? "ip",
-      opts.status ?? "active",
-      now,
-      opts.expiresAt ?? now + 180 * DAY,
-      opts.endedAt ?? null,
-      opts.suspendedAt ?? null,
-      opts.failCount ?? 0,
-      opts.lastHealthCheckAt ?? null,
-    ),
-    ...(opts.records ?? []).map((r, i) =>
-      env.DB.prepare(
-        `INSERT INTO records (id, lease_id, cf_record_id, type, host, content, proxied, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        `${id}-r${i}`,
-        id,
-        r.cfRecordId === undefined ? `dry_${uid()}` : r.cfRecordId,
-        r.type,
-        r.host,
-        r.content,
-        r.proxied ? 1 : 0,
-        now + i,
-        now + i,
-      ),
-    ),
-  ];
-  await env.DB.batch(stmts);
+  await env.DB.leases.insertOne({
+    id,
+    name: opts.name,
+    owner_email: opts.owner,
+    target_kind: opts.kind ?? "ip",
+    status: opts.status ?? "active",
+    status_reason: null,
+    created_at: now,
+    expires_at: opts.expiresAt ?? now + 180 * DAY,
+    ended_at: opts.endedAt ?? null,
+    suspended_at: opts.suspendedAt ?? null,
+    health_fail_count: opts.failCount ?? 0,
+    last_health_check_at: opts.lastHealthCheckAt ?? null,
+    last_health_ok_at: null,
+    last_health_detail: null,
+  });
+  if (opts.records?.length) {
+    await env.DB.records.insertMany(
+      opts.records.map((r, i) => ({
+        id: `${id}-r${i}`,
+        lease_id: id,
+        cf_record_id: r.cfRecordId === undefined ? `dry_${uid()}` : r.cfRecordId,
+        type: r.type,
+        host: r.host,
+        content: r.content,
+        proxied: r.proxied ? 1 : 0,
+        created_at: now + i,
+        updated_at: now + i,
+      })),
+    );
+  }
   return id;
 }
 
 export async function auditFor(filter: { action: string; leaseId?: string; targetEmail?: string }) {
-  const where = ["action = ?"];
-  const binds: unknown[] = [filter.action];
-  if (filter.leaseId) {
-    where.push("lease_id = ?");
-    binds.push(filter.leaseId);
-  }
-  if (filter.targetEmail) {
-    where.push("target_email = ?");
-    binds.push(filter.targetEmail);
-  }
-  const { results } = await env.DB.prepare(`SELECT * FROM audit_logs WHERE ${where.join(" AND ")} ORDER BY id`)
-    .bind(...binds)
-    .all<{ actor_email: string | null; actor_role: string; detail: string | null; lease_id: string | null }>();
-  return results.map((r) => ({ ...r, detail: r.detail ? (JSON.parse(r.detail) as Record<string, unknown>) : null }));
+  const results = await env.DB.auditLogs
+    .find({
+      action: filter.action as AuditAction,
+      ...(filter.leaseId ? { lease_id: filter.leaseId } : {}),
+      ...(filter.targetEmail ? { target_email: filter.targetEmail } : {}),
+    })
+    .sort({ _id: 1 })
+    .toArray();
+  return results.map((r) => ({ ...r, detail: r.detail as Record<string, unknown> | null }));
 }
 
 // ---------------------------------------------------------------------------
@@ -201,7 +190,7 @@ export function fakeCloudflare(fetchSpy: { mockImplementation: (fn: typeof fetch
   const ok = (result: unknown, extra: Record<string, unknown> = {}) => Response.json({ success: true, errors: [], result, ...extra });
   const fail = () => Response.json({ success: false, errors: [{ code: 1000, message: "boom" }], result: null }, { status: 500 });
 
-  fetchSpy.mockImplementation((async (input: RequestInfo | URL, init?: RequestInit) => {
+  fetchSpy.mockImplementation((async (input: string | URL | Request, init?: RequestInit) => {
     const url = input instanceof Request ? input.url : String(input);
     if (!url.startsWith(CF_BASE)) return realFetch(input, init);
     const method = init?.method ?? "GET";

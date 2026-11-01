@@ -6,8 +6,9 @@ export function apiError(c: Context, status: ContentfulStatusCode, code: string,
   return c.json({ error: { code, message } }, status);
 }
 
+/** Netlify가 넣어 주는 실제 클라이언트 IP */
 export function clientIp(c: Context): string | null {
-  return c.req.header("CF-Connecting-IP") ?? null;
+  return c.req.header("x-nf-client-connection-ip") ?? null;
 }
 
 export function userAgent(c: Context): string | null {

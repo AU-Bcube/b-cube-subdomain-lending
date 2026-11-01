@@ -6,7 +6,7 @@
  *
  * 외부 호출은 HealthDeps로 주입해 테스트에서 바꿀 수 있다.
  */
-import { connect } from "cloudflare:sockets";
+import { connect } from "node:net";
 import type { TargetKind } from "../../shared/rules";
 
 export const DOH_URL = "https://cloudflare-dns.com/dns-query";
@@ -174,28 +174,17 @@ export async function checkHealth(target: HealthTarget, mode: HealthMode, deps: 
   return httpProbe(deps, target.fqdn);
 }
 
-async function tcpProbe(hostname: string, port: number, timeoutMs: number): Promise<boolean> {
-  let socket;
-  try {
-    socket = connect({ hostname, port });
-  } catch {
-    return false;
-  }
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  try {
-    await Promise.race([
-      socket.opened,
-      new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
-      }),
-    ]);
-    return true;
-  } catch {
-    return false;
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    socket.close().catch(() => {});
-  }
+function tcpProbe(hostname: string, port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host: hostname, port, timeout: timeoutMs });
+    const done = (ok: boolean) => {
+      socket.destroy();
+      resolve(ok);
+    };
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+  });
 }
 
 export const defaultHealthDeps: HealthDeps = {
