@@ -14,7 +14,6 @@ export const DEFAULT_VARS: Partial<Record<VarName, string>> = {
   // 사용자 제공 값으로 채운다(Netlify 환경 변수로 넣어도 된다).
   CF_ZONE_ID: "",
   IDP_ISSUER: "https://id.b-cube.kr",
-  IDP_CLIENT_ID: "dyn-8919b43990d5418f9047",
   ALLOWED_EMAIL_DOMAIN: "ajou.ac.kr",
   REQUIRED_SOHAKOE: "B-cube",
   ADMIN_EMAILS: "",

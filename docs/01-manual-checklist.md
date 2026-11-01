@@ -44,11 +44,11 @@
 
 > 이 서비스는 Google OAuth 클라이언트를 직접 쓰지 않습니다. 로그인은 B-CUBE IdP(`https://id.b-cube.kr`)가 처리합니다. 기존 Google 클라이언트(`bcube-domain` 프로젝트)는 전환 후 삭제합니다.
 
-- [x] 등록 토큰으로 클라이언트를 동적 등록합니다(RFC 7591, 2026-11-01 다시 등록). `client_id`는 `dyn-8919b43990d5418f9047`이고, `redirect_uris`는 운영과 `http://localhost:5173/auth/callback`, scope는 `openid email profile sohakoe`입니다.
+- [x] 등록 토큰으로 클라이언트를 동적 등록합니다(RFC 7591, 2026-11-01 다시 등록). `client_id`는 `.env`의 `IDP_CLIENT_ID`에 있고, `redirect_uris`는 운영과 `http://localhost:5173/auth/callback`, scope는 `openid email profile sohakoe`입니다.
 - [ ] 쓰지 않는 예전 클라이언트 `dyn-f6c226535e6a490f8ff1`를 삭제합니다(`student` scope 포함). 관리자에게 요청하거나, 그때 받은 `registration_access_token`이 있으면 `registration_client_uri`에 DELETE 합니다.
 - [ ] 2026-11-01에 쓴 등록 토큰(`iat_...`)이 대화 기록에 남았으므로 관리자에게 폐기를 요청합니다.
 - [ ] IdP 관리자가 클라이언트를 승인할 때까지 기다립니다(`b_cube_status: pending`). 승인 전에는 로그인할 수 없습니다.
-- [x] 등록 응답의 `client_secret`을 로컬 `.env`의 `IDP_CLIENT_SECRET`에 넣었습니다(2026-11-01). `IDP_CLIENT_ID`는 `worker/runtime.ts`와 `.env`에 반영했습니다. 운영은 Netlify 환경 변수에 넣습니다(6번).
+- [x] 등록 응답의 `client_secret`을 로컬 `.env`의 `IDP_CLIENT_SECRET`에 넣었습니다(2026-11-01). `IDP_CLIENT_ID`도 `.env`에 넣었습니다. 운영은 둘 다 Netlify 환경 변수에 넣습니다(6번).
 - [ ] `client_secret`과 `registration_access_token`은 다시 받을 수 없습니다. 지금은 `.env`에만 있으므로 비밀번호 관리자에도 옮깁니다. 응답 파일은 지웠습니다. 등록 토큰(`iat_...`)은 `wrangler.jsonc` 같은 설정 파일에 넣지 않습니다.
 
 ## 5. 로컬 개발 환경
@@ -73,7 +73,7 @@
   netlify env:set CF_API_TOKEN "..." --secret
   netlify env:set DB_CONNECTION_STRING "..." --secret
   ```
-- [ ] `DB_NAME`, `CF_ZONE_ID`, `ADMIN_EMAILS`도 Netlify 환경 변수로 넣습니다. `IDP_ISSUER`, `IDP_CLIENT_ID` 등 그 밖의 기본값은 `worker/runtime.ts`의 `DEFAULT_VARS`에 있습니다.
+- [ ] `IDP_CLIENT_ID`, `DB_NAME`, `CF_ZONE_ID`, `ADMIN_EMAILS`도 Netlify 환경 변수로 넣습니다. `IDP_ISSUER` 등 그 밖의 기본값은 `worker/runtime.ts`의 `DEFAULT_VARS`에 있습니다.
 
 ## 7. 소학회 이름 확인 (운영 전환 전)
 

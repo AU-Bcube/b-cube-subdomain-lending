@@ -4,6 +4,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { sha256Base64url } from "../worker/auth/crypto";
 import { evaluateLogin } from "../worker/auth/login";
 import { parseConfig } from "../worker/env";
+import { envFromProcess } from "../worker/runtime";
 import { auditFor, call, createLease, createUser, login, ORIGIN, uid, workerWith } from "./helpers";
 
 const CLIENT_ID = "test-client-id"; // test/env.ts와 같은 값
@@ -261,6 +262,14 @@ describe("GET /auth/callback — 허용", () => {
     expect(location(callback)).toBe("/");
     const logs = await auditFor({ action: "auth.login", targetEmail: email });
     expect(logs.at(-1)?.actor_role).toBe("admin");
+  });
+});
+
+describe("IDP_CLIENT_ID 설정", () => {
+  it("기본값 없이 환경 변수에서만 읽고, 없으면 설정 오류다", () => {
+    expect(envFromProcess({}).IDP_CLIENT_ID).toBeUndefined();
+    expect(envFromProcess({ IDP_CLIENT_ID: "from-env" }).IDP_CLIENT_ID).toBe("from-env");
+    expect(() => parseConfig({ ...env, IDP_CLIENT_ID: "" })).toThrow(/IDP_CLIENT_ID/);
   });
 });
 

@@ -40,7 +40,7 @@ pnpm run dev            # → http://localhost:5173
 
 ### 실제 IdP 로그인 시험
 
-`.env`에 `IDP_CLIENT_SECRET`을 채웁니다(`IDP_ISSUER`, `IDP_CLIENT_ID` 기본값은 `worker/runtime.ts`에 있습니다). IdP에 등록한 클라이언트의 `redirect_uris`에 `http://localhost:5173/auth/callback`이 있어야 합니다. 로컬 IdP를 쓰려면 `.env`에 `IDP_ISSUER`를 덧붙입니다. `DEV_AUTH_DEBUG=true`이면 `/auth/debug`에서 마지막 로그인의 `email`, `email_verified`, 소학회 이름을 볼 수 있습니다.
+`.env`에 `IDP_CLIENT_ID`, `IDP_CLIENT_SECRET`을 채웁니다(`IDP_ISSUER` 기본값은 `worker/runtime.ts`에 있습니다). IdP에 등록한 클라이언트의 `redirect_uris`에 `http://localhost:5173/auth/callback`이 있어야 합니다. 로컬 IdP를 쓰려면 `.env`에 `IDP_ISSUER`를 덧붙입니다. `DEV_AUTH_DEBUG=true`이면 `/auth/debug`에서 마지막 로그인의 `email`, `email_verified`, 소학회 이름을 볼 수 있습니다.
 
 로그인에는 환경 변수 `REQUIRED_SOHAKOE`(기본 `B-cube`, 대소문자 무시)에 적은 소학회의 이력이 필요합니다. IdP의 소학회 가입내역(`sohakoe_memberships`)에서 이름이 같은 항목을 찾습니다. 로컬은 `.env`, 운영은 Netlify 환경 변수로 바꾸고, 운영은 다시 배포해야 반영됩니다. `ADMIN_EMAILS`만 면제입니다. 개발용 가짜 로그인 페르소나는 이 소학회 회원으로 취급합니다.
 
@@ -100,12 +100,13 @@ pnpm run cron drift    # 드리프트 점검
    ```bash
    netlify env:set DB_CONNECTION_STRING "mongodb+srv://..." --secret
    netlify env:set DB_NAME "..."
+   netlify env:set IDP_CLIENT_ID "..."
    netlify env:set IDP_CLIENT_SECRET "..." --secret
    netlify env:set CF_ZONE_ID "..."
    netlify env:set CF_API_TOKEN "..." --secret
    netlify env:set ADMIN_EMAILS "..."
    ```
-   - 나머지 값은 `worker/runtime.ts`의 `DEFAULT_VARS`(운영 기본값)를 씁니다. `IDP_ISSUER`, `IDP_CLIENT_ID`, `REQUIRED_SOHAKOE`도 여기 있습니다. 바꿀 값만 환경 변수로 넣으면 됩니다(`REQUIRED_SOHAKOE`는 체크리스트 7번 결과).
+   - 나머지 값은 `worker/runtime.ts`의 `DEFAULT_VARS`(운영 기본값)를 씁니다. `IDP_ISSUER`, `REQUIRED_SOHAKOE`도 여기 있습니다. `IDP_CLIENT_ID`는 기본값이 없어 꼭 넣어야 합니다. 바꿀 값만 환경 변수로 넣으면 됩니다(`REQUIRED_SOHAKOE`는 체크리스트 7번 결과).
    - `APP_ORIGIN`은 `https://domain.b-cube.kr`, `DNS_DRY_RUN`·`DEV_FAKE_LOGIN`·`DEV_AUTH_DEBUG`는 모두 false여야 합니다. 하나라도 true면 모든 요청이 500이 됩니다(안전장치). Netlify 환경 변수의 Functions 범위에 들어가 있어야 합니다.
 5. 배포: `git push`(연결된 브랜치) 또는 `netlify deploy --build --prod`
 6. 커스텀 도메인: Netlify → Domain management에서 `domain.b-cube.kr` 추가 → Cloudflare DNS에 `domain` CNAME `<site>.netlify.app`(**DNS only**, 프록시 끔)을 만듭니다. 기존 `domain.b-cube.kr` 레코드(예전 Workers 커스텀 도메인)는 먼저 지웁니다. Netlify가 HTTPS 인증서를 발급할 때까지 기다립니다.
