@@ -76,14 +76,26 @@ body {
 
   .login-card {
     width: 100%;
-    max-width: 28rem;
+    max-width: 42rem;
   }
 
   .login-tile {
-    padding: 2rem;
+    // 오류 알림처럼 내용이 늘어나면 박스도 함께 늘어나도록 최소 높이만 정한다.
+    min-height: 24rem;
+    padding: 2.5rem;
     display: flex;
     flex-direction: column;
+    justify-content: center;
     gap: 1.25rem;
+
+    // Stack 간격 1rem에 더해 제목–설명 2rem, 설명–버튼 5rem이 된다.
+    h1 {
+      margin-bottom: 1rem;
+    }
+
+    .cds--btn {
+      margin-top: 4rem;
+    }
   }
 
   .dev-personas {
@@ -401,11 +413,11 @@ body {
     padding-inline: 0;
   }
 
-  // cds--type-* 클래스는 빌드에 포함되지 않아 Carbon 기본 제목 크기가 그대로 나온다. 좁은 화면에서만 줄인다.
+  // cds--type-* 클래스는 빌드에 포함되지 않아 Carbon 기본 제목 크기가 그대로 나온다. 좁은 화면에서는 여기서 크기를 정한다.
   .cds--type-heading-05,
   .cds--type-heading-04,
   .detail-title h1.mono {
-    font-size: 1.5rem;
+    font-size: 2rem;
     line-height: 1.3;
   }
 
@@ -464,7 +476,8 @@ body {
     padding: 1rem 0.5rem;
 
     .login-tile {
-      padding: 1.875rem;
+      min-height: 24rem;
+      padding: 2rem;
     }
   }
 
