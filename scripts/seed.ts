@@ -420,7 +420,7 @@ try {
     }),
   ]);
 } catch (err) {
-  console.error("시드 적용 실패. 먼저 `npm run db:migrate`를 실행했는지 확인하세요.");
+  console.error("시드 적용 실패. 먼저 `pnpm run db:migrate`를 실행했는지 확인하세요.");
   console.error(err instanceof Error ? err.message : err);
   process.exitCode = 1;
 } finally {

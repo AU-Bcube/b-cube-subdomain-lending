@@ -19,10 +19,11 @@ MongoDB만 있으면 OAuth 클라이언트와 Cloudflare 토큰 없이 동작합
 > 화면만 확인하려면 `--replSet`으로 띄운 로컬 mongod를 잠시 `.env`에 넣으세요.
 
 ```bash
+# 패키지 매니저는 pnpm입니다(package.json의 packageManager). corepack enable로 같은 버전을 쓸 수 있습니다.
 cp .env.example .env   # 기본값: DEV_FAKE_LOGIN=true, DNS_DRY_RUN=true, 시크릿 비움. DB_*를 채운다
-npm install
-npm run db:reset       # localhost DB 전용: 컬렉션 삭제 → 인덱스 → 시드
-npm run dev            # → http://localhost:5173
+pnpm install
+pnpm run db:reset       # localhost DB 전용: 컬렉션 삭제 → 인덱스 → 시드
+pnpm run dev            # → http://localhost:5173
 ```
 
 로그인 화면 하단의 개발용 버튼으로 시드 사용자에 로그인합니다.
@@ -51,12 +52,12 @@ npm run dev            # → http://localhost:5173
 
 ### Cron 수동 실행
 
-`.env`의 DB에 대해 각 작업을 한 번 실행합니다. dev 서버는 띄우지 않아도 됩니다. 원격 DB에는 `npm run cron -- health --remote`처럼 `--remote`가 필요하고, `DNS_DRY_RUN=false`이면 **실제 DNS가 바뀔 수 있습니다.**
+`.env`의 DB에 대해 각 작업을 한 번 실행합니다. dev 서버는 띄우지 않아도 됩니다. 원격 DB에는 `pnpm run cron health --remote`처럼 `--remote`가 필요하고, `DNS_DRY_RUN=false`이면 **실제 DNS가 바뀔 수 있습니다.**
 
 ```bash
-npm run cron -- health   # 헬스체크 + 끊긴 DNS 작업 복구
-npm run cron -- daily    # 만료 처리 + 만료 세션 삭제
-npm run cron -- drift    # 드리프트 점검
+pnpm run cron health   # 헬스체크 + 끊긴 DNS 작업 복구
+pnpm run cron daily    # 만료 처리 + 만료 세션 삭제
+pnpm run cron drift    # 드리프트 점검
 ```
 
 `DNS_DRY_RUN=true`에서는 드리프트 점검이 Cloudflare를 조회하지 않으므로 모든 레코드가 "DB에만 있음"으로 나옵니다.
@@ -65,16 +66,16 @@ npm run cron -- drift    # 드리프트 점검
 
 | 스크립트 | 동작 |
 |---|---|
-| `npm run dev` | SPA(HMR) + `/api/*`·`/auth/*`를 Netlify 함수 코드로 처리 + `.env`의 MongoDB (`http://localhost:5173`) |
-| `npm run build` | SPA 빌드(`dist/`). 함수는 Netlify가 배포 시 `netlify/functions/`에서 번들합니다 |
-| `npm run preview` | 빌드한 SPA + 함수 코드로 실행 |
-| `npm run db:migrate` | 인덱스 적용(`worker/db.ts`의 `INDEXES`). 원격 DB는 `-- --remote` |
-| `npm run db:migrate:remote` | `.env`의 원격 DB에 인덱스 적용 — **운영 변경** |
-| `npm run db:seed` | 시드 (멱등). 원격 DB는 `-- --remote` |
-| `npm run db:reset` | 앱 컬렉션 삭제 → 인덱스 → 시드. **localhost DB 전용** |
-| `npm run cron -- <health\|daily\|drift>` | `.env`의 DB로 예약 작업 1회 실행. 원격 DB는 뒤에 `--remote` |
-| `npm run typecheck` | app / worker / node tsconfig 각각 `tsc --noEmit` |
-| `npm test` | Vitest (Node, 인메모리 MongoDB 복제 세트, 외부 API는 fetch mock). `.env`의 DB는 쓰지 않습니다. 첫 실행 때 mongod를 내려받습니다 |
+| `pnpm run dev` | SPA(HMR) + `/api/*`·`/auth/*`를 Netlify 함수 코드로 처리 + `.env`의 MongoDB (`http://localhost:5173`) |
+| `pnpm run build` | SPA 빌드(`dist/`). 함수는 Netlify가 배포 시 `netlify/functions/`에서 번들합니다 |
+| `pnpm run preview` | 빌드한 SPA + 함수 코드로 실행 |
+| `pnpm run db:migrate` | 인덱스 적용(`worker/db.ts`의 `INDEXES`). 원격 DB는 `--remote` |
+| `pnpm run db:migrate:remote` | `.env`의 원격 DB에 인덱스 적용 — **운영 변경** |
+| `pnpm run db:seed` | 시드 (멱등). 원격 DB는 `--remote` |
+| `pnpm run db:reset` | 앱 컬렉션 삭제 → 인덱스 → 시드. **localhost DB 전용** |
+| `pnpm run cron <health\|daily\|drift>` | `.env`의 DB로 예약 작업 1회 실행. 원격 DB는 뒤에 `--remote` |
+| `pnpm run typecheck` | app / worker / node tsconfig 각각 `tsc --noEmit` |
+| `pnpm test` | Vitest (Node, 인메모리 MongoDB 복제 세트, 외부 API는 fetch mock). `.env`의 DB는 쓰지 않습니다. 첫 실행 때 mongod를 내려받습니다 |
 
 `db:migrate`, `db:seed`, `cron`은 localhost가 아닌 DB면 `--remote` 없이는 멈춥니다. `db:reset`은 원격 DB에서 동작하지 않습니다.
 
@@ -93,7 +94,7 @@ npm run cron -- drift    # 드리프트 점검
 아래 명령은 운영 환경을 바꿉니다. 순서대로, 각 단계 결과를 확인하며 직접 실행하세요. Netlify CLI(`npm i -g netlify-cli`)가 필요합니다.
 
 1. MongoDB 준비: Atlas 클러스터와 DB 사용자를 만듭니다. Netlify 함수의 나가는 IP는 고정되지 않으므로 Network Access에서 접속을 허용해야 합니다.
-2. 인덱스 적용: `npm run db:migrate:remote`(2026-11-01 Atlas에 적용 완료. `INDEXES`를 바꾸면 다시 실행). 이름 중복과 복구 잠금을 유일 인덱스가 막습니다.
+2. 인덱스 적용: `pnpm run db:migrate:remote`(2026-11-01 Atlas에 적용 완료. `INDEXES`를 바꾸면 다시 실행). 이름 중복과 복구 잠금을 유일 인덱스가 막습니다.
 3. Netlify 사이트 연결: `netlify login` → `netlify init`(저장소 연결). 빌드 설정은 `netlify.toml`에 있습니다.
 4. Netlify 환경 변수 입력(Site configuration → Environment variables, 또는 아래 명령. 비밀 값은 Secret으로 표시):
    ```bash
@@ -115,7 +116,7 @@ npm run cron -- drift    # 드리프트 점검
 
 ### 스키마 변경
 
-컬렉션과 인덱스는 `worker/db.ts`에 있습니다. 인덱스는 `INDEXES`에 추가하고 `npm run db:migrate`로 적용합니다(운영은 배포 전에 `db:migrate:remote`). 필드를 바꿀 때는 이미 있는 문서를 함께 고려하세요. 삭제처럼 되돌리기 어려운 변경은 백업(`mongodump`) 후 진행합니다.
+컬렉션과 인덱스는 `worker/db.ts`에 있습니다. 인덱스는 `INDEXES`에 추가하고 `pnpm run db:migrate`로 적용합니다(운영은 배포 전에 `db:migrate:remote`). 필드를 바꿀 때는 이미 있는 문서를 함께 고려하세요. 삭제처럼 되돌리기 어려운 변경은 백업(`mongodump`) 후 진행합니다.
 
 ### Cloudflare D1 데이터
 
