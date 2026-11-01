@@ -38,7 +38,7 @@
 | 정적 서빙 | Netlify 정적 배포(`dist/`), SPA 폴백은 `public/_redirects` |
 | JWT 검증 | **`jose`** (`createRemoteJWKSet`) |
 | 입력 검증 | **`zod`** (서버/클라이언트 스키마 공유) |
-| 패키지 매니저 | **pnpm** (`package.json`의 `packageManager`, `pnpm-lock.yaml`). 잠금 파일은 하나만 둔다 |
+| 패키지 매니저 | **pnpm 12** (`package.json`의 `packageManager`, `pnpm-lock.yaml`). 잠금 파일은 하나만 둔다. Node는 **24** (`netlify.toml`) |
 | 테스트 | **Vitest** (Node, `mongodb-memory-server-core` 복제 세트) |
 | 폰트 | IBM Plex Sans KR |
 

@@ -203,7 +203,7 @@
 | 9.14 | IdP 클라이언트 재등록 (`student` 제외) | §6.1 | 완료 | 2026-11-01 사용자가 등록 토큰 제공. `client_id` `dyn-8919b43990d5418f9047`, `pending` 승인 대기. 비밀값은 `.env`에만 저장(커밋 안 됨) |
 | 9.15 | 필수 소학회 이름을 환경 변수로 설정 | §4 | 완료 | 2026-11-01 사용자 요청. 코드는 이미 `REQUIRED_SOHAKOE`를 읽고 있어 `.env`, `.env.example`, `DEV.md`에 드러냄 |
 | 9.16 | 변경 사항을 GitHub에 올림 | - | 완료 | 2026-11-01 사용자 요청. 브랜치 `feat/netlify-mongodb`, PR #17. 병합과 배포는 하지 않음 |
-| 9.17 | Netlify 패키지 매니저를 pnpm으로 고정 | §2 | 완료 | 2026-11-01. `package-lock.json`과 `pnpm-lock.yaml`이 함께 있어 Netlify 감지 코드가 GitHub 목록의 첫 잠금 파일인 npm을 고름(재현). `packageManager` 추가, `package-lock.json` 삭제, 빌드 명령과 문서를 pnpm으로 변경 |
+| 9.17 | Netlify 패키지 매니저를 pnpm으로 고정 | §2 | 완료 | 2026-11-01. `package-lock.json`과 `pnpm-lock.yaml`이 함께 있어 Netlify 감지 코드가 GitHub 목록의 첫 잠금 파일인 npm을 고름(재현). `packageManager` 추가, `package-lock.json` 삭제, 빌드 명령과 문서를 pnpm으로 변경. 사용자 요청으로 Node 24, pnpm 12.16.1로 올림(잠금 파일 형식 변경, Corepack으로 설치·테스트·빌드·번들 확인). 실제 Netlify 빌드는 미확인 |
 | 9.9 | SP_MIGRATION_PROMPT 최신판 반영: 동의 철회 링크(상단 메뉴, `/api/me`의 `consentUrl`), 문서 | §6.1 | 완료 | 나머지 항목은 #15에서 적용됨을 코드로 확인. 삭제 요청 절차는 없음(LIMITATIONS 3.13) |
 
 ## 3. 구현 중 확인·보고할 사항

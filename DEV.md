@@ -19,7 +19,7 @@ MongoDB만 있으면 OAuth 클라이언트와 Cloudflare 토큰 없이 동작합
 > 화면만 확인하려면 `--replSet`으로 띄운 로컬 mongod를 잠시 `.env`에 넣으세요.
 
 ```bash
-# 패키지 매니저는 pnpm입니다(package.json의 packageManager). corepack enable로 같은 버전을 쓸 수 있습니다.
+# Node 24, pnpm 12(package.json의 packageManager)를 씁니다. pnpm 10이 전역에 있으면 실행이 실패하니 corepack enable pnpm으로 맞춥니다.
 cp .env.example .env   # 기본값: DEV_FAKE_LOGIN=true, DNS_DRY_RUN=true, 시크릿 비움. DB_*를 채운다
 pnpm install
 pnpm run db:reset       # localhost DB 전용: 컬렉션 삭제 → 인덱스 → 시드
