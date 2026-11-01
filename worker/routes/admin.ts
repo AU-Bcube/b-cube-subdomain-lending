@@ -8,28 +8,29 @@ import {
   type AdminLeaseItem,
   type AdminUserItem,
   type AuditLogItem,
-  type DriftItem,
-  type DriftRepairSummary,
   type DriftResponse,
   type RecoverOpsResponse,
   type Paged,
 } from "../../shared/schemas";
+import { NO_ID, type AuditRow, type UserRow } from "../db";
 import { apiError } from "../lib/http";
 import { requireAdmin, requireUser } from "../middleware/auth";
+import { deleteAccount } from "../services/account";
 import { auditStatement, requestMeta, writeAudit } from "../services/audit";
 import { createDnsClient, DnsError } from "../services/cloudflare-dns";
-import type { DnsOpRow } from "../services/dns-ops";
 import { acquireLock, getLock, RECOVER_LOCK, RECOVER_LOCK_MS } from "../services/job-lock";
 import { changedCount, recoverPendingOps } from "../services/repair";
 import {
   getLease,
   getRecordsByLease,
+  LeaseError,
   LeaseStateError,
   revokeLease,
   toRecordView,
   type Actor,
   type LeaseRow,
 } from "../services/leases";
+import type { Filter } from "mongodb";
 import type { HonoEnv } from "../types";
 
 const LEASES_PAGE_SIZE = 20;
@@ -40,9 +41,9 @@ const page = z.coerce.number().int().min(1).max(100_000).catch(1);
 const optionalText = z.string().trim().max(200).optional().catch(undefined);
 const optionalMs = z.coerce.number().int().min(0).optional().catch(undefined);
 
-/** LIKE 검색어의 와일드카드 이스케이프. `ESCAPE '\'`와 함께 쓴다. */
-function likeContains(value: string): string {
-  return `%${value.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+/** 부분 일치 검색(대소문자 무시). 검색어의 정규식 문자는 이스케이프한다. */
+function contains(value: string) {
+  return { $regex: value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), $options: "i" };
 }
 
 async function readBody<T>(c: Context<HonoEnv>, schema: z.ZodType<T>): Promise<T | Response> {
@@ -75,15 +76,6 @@ function leaseItem(row: LeaseRow, records: AdminLeaseItem["records"]): AdminLeas
   };
 }
 
-function parseDetail(detail: string | null): unknown {
-  if (detail === null) return null;
-  try {
-    return JSON.parse(detail);
-  } catch {
-    return detail;
-  }
-}
-
 export const adminRoutes = new Hono<HonoEnv>()
   .use("*", requireUser, requireAdmin)
 
@@ -92,27 +84,21 @@ export const adminRoutes = new Hono<HonoEnv>()
     const query = z
       .object({ status: z.enum(LEASE_STATUSES).optional().catch(undefined), q: optionalText, page })
       .parse(c.req.query());
-    const where: string[] = [];
-    const binds: unknown[] = [];
-    if (query.status) {
-      where.push("status = ?");
-      binds.push(query.status);
-    }
-    if (query.q) {
-      where.push(`(name LIKE ? ESCAPE '\\' OR owner_email LIKE ? ESCAPE '\\')`);
-      binds.push(likeContains(query.q.toLowerCase()), likeContains(query.q.toLowerCase()));
-    }
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const filter: Filter<LeaseRow> = {};
+    if (query.status) filter.status = query.status;
+    if (query.q) filter.$or = [{ name: contains(query.q) }, { owner_email: contains(query.q) }];
     const db = c.env.DB;
-    const total = await db.prepare(`SELECT COUNT(*) AS n FROM leases ${whereSql}`).bind(...binds).first<{ n: number }>();
-    const { results } = await db
-      .prepare(`SELECT * FROM leases ${whereSql} ORDER BY created_at DESC, id LIMIT ? OFFSET ?`)
-      .bind(...binds, LEASES_PAGE_SIZE, (query.page - 1) * LEASES_PAGE_SIZE)
-      .all<LeaseRow>();
+    const total = await db.leases.countDocuments(filter);
+    const results = await db.leases
+      .find(filter, NO_ID)
+      .sort({ created_at: -1, id: 1 })
+      .skip((query.page - 1) * LEASES_PAGE_SIZE)
+      .limit(LEASES_PAGE_SIZE)
+      .toArray();
     const records = await getRecordsByLease(db, results.map((r) => r.id));
     const body: Paged<AdminLeaseItem> = {
       items: results.map((row) => leaseItem(row, (records.get(row.id) ?? []).map(toRecordView))),
-      total: total?.n ?? 0,
+      total,
       page: query.page,
       pageSize: LEASES_PAGE_SIZE,
     };
@@ -141,37 +127,22 @@ export const adminRoutes = new Hono<HonoEnv>()
     const query = z
       .object({ q: optionalText, banned: z.enum(["true", "false"]).optional().catch(undefined), page })
       .parse(c.req.query());
-    const where: string[] = [];
-    const binds: unknown[] = [];
-    if (query.q) {
-      where.push(`(u.email LIKE ? ESCAPE '\\' OR u.name LIKE ? ESCAPE '\\')`);
-      binds.push(likeContains(query.q.toLowerCase()), likeContains(query.q));
-    }
-    if (query.banned === "true") where.push("u.banned_at IS NOT NULL");
-    if (query.banned === "false") where.push("u.banned_at IS NULL");
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+    const filter: Filter<UserRow> = {};
+    if (query.q) filter.$or = [{ email: contains(query.q) }, { name: contains(query.q) }];
+    if (query.banned === "true") filter.banned_at = { $ne: null };
+    if (query.banned === "false") filter.banned_at = null;
     const db = c.env.DB;
-    const total = await db.prepare(`SELECT COUNT(*) AS n FROM users u ${whereSql}`).bind(...binds).first<{ n: number }>();
-    const { results } = await db
-      .prepare(
-        `SELECT u.email, u.name, u.first_login_at, u.last_login_at, u.banned_at, u.ban_reason,
-                (SELECT COUNT(*) FROM leases l WHERE l.owner_email = u.email AND l.status IN ('active','suspended')) AS live_count,
-                (SELECT COUNT(*) FROM leases l WHERE l.owner_email = u.email) AS total_count
-           FROM users u ${whereSql}
-          ORDER BY u.last_login_at DESC, u.email
-          LIMIT ? OFFSET ?`,
-      )
-      .bind(...binds, USERS_PAGE_SIZE, (query.page - 1) * USERS_PAGE_SIZE)
-      .all<{
-        email: string;
-        name: string | null;
-        first_login_at: number;
-        last_login_at: number;
-        banned_at: number | null;
-        ban_reason: string | null;
-        live_count: number;
-        total_count: number;
-      }>();
+    const total = await db.users.countDocuments(filter);
+    const results = await db.users
+      .find(filter)
+      .sort({ last_login_at: -1, email: 1 })
+      .skip((query.page - 1) * USERS_PAGE_SIZE)
+      .limit(USERS_PAGE_SIZE)
+      .toArray();
+    // 보유 lease 수
+    const owned = await db.leases.find({ owner_email: { $in: results.map((u) => u.email) } }, { projection: { _id: 0, owner_email: 1, status: 1 } }).toArray();
+    const countOf = (email: string, live: boolean) =>
+      owned.filter((l) => l.owner_email === email && (!live || l.status === "active" || l.status === "suspended")).length;
     const admins = c.var.config.adminEmails;
     const body: Paged<AdminUserItem> = {
       items: results.map((u) => ({
@@ -182,10 +153,10 @@ export const adminRoutes = new Hono<HonoEnv>()
         lastLoginAt: u.last_login_at,
         bannedAt: u.banned_at,
         banReason: u.ban_reason,
-        liveLeaseCount: u.live_count,
-        totalLeaseCount: u.total_count,
+        liveLeaseCount: countOf(u.email, true),
+        totalLeaseCount: countOf(u.email, false),
       })),
-      total: total?.n ?? 0,
+      total,
       page: query.page,
       pageSize: USERS_PAGE_SIZE,
     };
@@ -200,24 +171,21 @@ export const adminRoutes = new Hono<HonoEnv>()
     if (email === c.var.user.email) return apiError(c, 400, "cannot_ban_self", "자기 자신은 차단할 수 없습니다.");
 
     const db = c.env.DB;
-    const user = await db.prepare(`SELECT email, banned_at FROM users WHERE email = ?`).bind(email).first<{
-      email: string;
-      banned_at: number | null;
-    }>();
+    const user = await db.users.findOne({ email });
     if (!user) return apiError(c, 404, "not_found", "사용자를 찾을 수 없습니다.");
     if (user.banned_at !== null) return apiError(c, 409, "already_banned", "이미 차단된 사용자입니다.");
 
     // 차단 표시를 먼저 해서 남은 요청도 requireUser에서 즉시 막는다.
     const now = Date.now();
     const [, sessions] = await db.batch([
-      db.prepare(`UPDATE users SET banned_at = ?, ban_reason = ? WHERE email = ?`).bind(now, input.reason, email),
-      db.prepare(`DELETE FROM sessions WHERE email = ?`).bind(email),
+      db.write((session) => db.users.updateOne({ email }, { $set: { banned_at: now, ban_reason: input.reason } }, { session })),
+      db.write((session) => db.sessions.deleteMany({ email }, { session })),
     ]);
 
-    const { results: leases } = await db
-      .prepare(`SELECT * FROM leases WHERE owner_email = ? AND status IN ('active','suspended') ORDER BY created_at`)
-      .bind(email)
-      .all<LeaseRow>();
+    const leases = await db.leases
+      .find({ owner_email: email, status: { $in: ["active", "suspended"] } }, NO_ID)
+      .sort({ created_at: 1 })
+      .toArray();
     const dns = createDnsClient(c.var.config);
     const actor = adminActor(c);
     const revoked: string[] = [];
@@ -237,7 +205,7 @@ export const adminRoutes = new Hono<HonoEnv>()
       actorEmail: actor.email,
       actorRole: "admin",
       targetEmail: email,
-      detail: { reason: input.reason, revokedLeases: revoked, failedLeases: failed, sessionsDeleted: sessions?.meta.changes ?? 0 },
+      detail: { reason: input.reason, revokedLeases: revoked, failedLeases: failed, sessionsDeleted: sessions ?? 0 },
       ...requestMeta(c),
     });
     return c.json({ ok: true, revokedLeases: revoked, failedLeases: failed });
@@ -249,15 +217,12 @@ export const adminRoutes = new Hono<HonoEnv>()
     if (input instanceof Response) return input;
     const email = c.req.param("email").trim().toLowerCase();
     const db = c.env.DB;
-    const user = await db.prepare(`SELECT banned_at, ban_reason FROM users WHERE email = ?`).bind(email).first<{
-      banned_at: number | null;
-      ban_reason: string | null;
-    }>();
+    const user = await db.users.findOne({ email });
     if (!user) return apiError(c, 404, "not_found", "사용자를 찾을 수 없습니다.");
     if (user.banned_at === null) return apiError(c, 409, "not_banned", "차단된 사용자가 아닙니다.");
 
     await db.batch([
-      db.prepare(`UPDATE users SET banned_at = NULL, ban_reason = NULL WHERE email = ?`).bind(email),
+      db.write((session) => db.users.updateOne({ email }, { $set: { banned_at: null, ban_reason: null } }, { session })),
       auditStatement(db, {
         action: "admin.unban",
         actorEmail: c.var.user.email,
@@ -267,6 +232,37 @@ export const adminRoutes = new Hono<HonoEnv>()
         ...requestMeta(c),
       }),
     ]);
+    return c.json({ ok: true });
+  })
+
+  // 회원 정보 삭제: 남은 lease를 회수하고 사용자, 세션, 레코드를 지운다. 감사 로그는 남는다.
+  // 차단된 사용자는 지우면 차단 기록이 사라져 다시 가입할 수 있으므로 먼저 차단을 해제해야 한다.
+  .post("/users/:email/delete", async (c) => {
+    const input = await readBody(c, reasonSchema);
+    if (input instanceof Response) return input;
+    const email = c.req.param("email").trim().toLowerCase();
+    if (email === c.var.user.email) return apiError(c, 400, "cannot_delete_self", "자기 자신은 삭제할 수 없습니다. 회원 탈퇴를 이용하세요.");
+
+    const db = c.env.DB;
+    const user = await db.users.findOne({ email });
+    if (!user) return apiError(c, 404, "not_found", "사용자를 찾을 수 없습니다.");
+    if (user.banned_at !== null) return apiError(c, 409, "user_banned", "차단된 사용자입니다. 차단을 해제한 뒤 삭제하세요.");
+
+    const dns = createDnsClient(c.var.config);
+    const actor = adminActor(c);
+    try {
+      await deleteAccount(db, dns, email, {
+        action: "admin.delete_user",
+        actor,
+        reason: input.reason,
+        endLease: (lease) => revokeLease(db, dns, lease, "user_deleted", actor),
+      });
+    } catch (err) {
+      if (err instanceof LeaseError) return apiError(c, 409, err.code, err.message);
+      if (err instanceof LeaseStateError) return apiError(c, 409, "invalid_status", err.message);
+      if (err instanceof DnsError) return apiError(c, 502, "dns_error", err.message);
+      throw err;
+    }
     return c.json({ ok: true });
   })
 
@@ -282,68 +278,43 @@ export const adminRoutes = new Hono<HonoEnv>()
         page,
       })
       .parse(c.req.query());
-    const where: string[] = [];
-    const binds: unknown[] = [];
-    if (query.actor) {
-      where.push(`a.actor_email LIKE ? ESCAPE '\\'`);
-      binds.push(likeContains(query.actor.toLowerCase()));
-    }
-    if (query.action) {
-      where.push("a.action = ?");
-      binds.push(query.action);
-    }
+    const db = c.env.DB;
+    const filter: Filter<AuditRow> = {};
+    if (query.actor) filter.actor_email = contains(query.actor);
+    if (query.action) filter.action = query.action;
     if (query.lease) {
       // lease id 또는 이름
-      where.push("(a.lease_id = ? OR l.name = ?)");
-      binds.push(query.lease, query.lease.toLowerCase());
+      const named = await db.leases.find({ name: query.lease.toLowerCase() }, { projection: { _id: 0, id: 1 } }).toArray();
+      filter.lease_id = { $in: [query.lease, ...named.map((l) => l.id)] };
     }
-    if (query.from !== undefined) {
-      where.push("a.at >= ?");
-      binds.push(query.from);
+    if (query.from !== undefined || query.to !== undefined) {
+      filter.at = { ...(query.from !== undefined ? { $gte: query.from } : {}), ...(query.to !== undefined ? { $lt: query.to } : {}) };
     }
-    if (query.to !== undefined) {
-      where.push("a.at < ?");
-      binds.push(query.to);
-    }
-    const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
-    const from = `FROM audit_logs a LEFT JOIN leases l ON l.id = a.lease_id ${whereSql}`;
-    const db = c.env.DB;
-    const total = await db.prepare(`SELECT COUNT(*) AS n ${from}`).bind(...binds).first<{ n: number }>();
-    const { results } = await db
-      .prepare(
-        `SELECT a.id, a.at, a.actor_email, a.actor_role, a.action, a.lease_id, l.name AS lease_name,
-                a.target_email, a.detail, a.ip
-           ${from}
-          ORDER BY a.at DESC, a.id DESC
-          LIMIT ? OFFSET ?`,
-      )
-      .bind(...binds, AUDIT_PAGE_SIZE, (query.page - 1) * AUDIT_PAGE_SIZE)
-      .all<{
-        id: number;
-        at: number;
-        actor_email: string | null;
-        actor_role: AuditLogItem["actorRole"];
-        action: AuditLogItem["action"];
-        lease_id: string | null;
-        lease_name: string | null;
-        target_email: string | null;
-        detail: string | null;
-        ip: string | null;
-      }>();
+    const total = await db.auditLogs.countDocuments(filter);
+    const results = await db.auditLogs
+      .find(filter)
+      .sort({ at: -1, _id: -1 })
+      .skip((query.page - 1) * AUDIT_PAGE_SIZE)
+      .limit(AUDIT_PAGE_SIZE)
+      .toArray();
+    const leaseIds = [...new Set(results.flatMap((r) => (r.lease_id ? [r.lease_id] : [])))];
+    const leaseNames = new Map(
+      (await db.leases.find({ id: { $in: leaseIds } }, { projection: { _id: 0, id: 1, name: 1 } }).toArray()).map((l) => [l.id, l.name]),
+    );
     const body: Paged<AuditLogItem> = {
       items: results.map((r) => ({
-        id: r.id,
+        id: r._id.toHexString(),
         at: r.at,
         actorEmail: r.actor_email,
         actorRole: r.actor_role,
         action: r.action,
         leaseId: r.lease_id,
-        leaseName: r.lease_name,
+        leaseName: r.lease_id ? (leaseNames.get(r.lease_id) ?? null) : null,
         targetEmail: r.target_email,
-        detail: parseDetail(r.detail),
+        detail: r.detail,
         ip: r.ip,
       })),
-      total: total?.n ?? 0,
+      total,
       page: query.page,
       pageSize: AUDIT_PAGE_SIZE,
     };
@@ -353,27 +324,19 @@ export const adminRoutes = new Hono<HonoEnv>()
   // 최근 reconcile 결과와 끝나지 않은 DNS 작업 기록
   .get("/drift", async (c) => {
     const db = c.env.DB;
-    const row = await db.prepare(`SELECT * FROM reconcile_runs ORDER BY at DESC, id DESC LIMIT 1`).first<{
-      id: number;
-      at: number;
-      ok: number;
-      drift_count: number;
-      items: string;
-      error: string | null;
-      repaired: string | null;
-    }>();
-    const { results: ops } = await db.prepare(`SELECT * FROM dns_ops ORDER BY started_at LIMIT 100`).all<DnsOpRow>();
+    const row = await db.reconcileRuns.findOne({}, { sort: { at: -1, _id: -1 } });
+    const ops = await db.dnsOps.find({}, NO_ID).sort({ started_at: 1 }).limit(100).toArray();
     const lock = await getLock(db, RECOVER_LOCK, RECOVER_LOCK_MS);
     const body: DriftResponse = {
       run: row
         ? {
-            id: row.id,
+            id: row._id.toHexString(),
             at: row.at,
             ok: row.ok === 1,
             driftCount: row.drift_count,
-            items: (parseDetail(row.items) as DriftItem[] | null) ?? [],
+            items: row.items,
             error: row.error,
-            repaired: row.repaired ? (parseDetail(row.repaired) as DriftRepairSummary | null) : null,
+            repaired: row.repaired,
           }
         : null,
       pendingOps: ops.map((op) => ({

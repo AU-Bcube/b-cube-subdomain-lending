@@ -20,6 +20,8 @@ export const adminApi = {
       method: "POST",
       json: { reason },
     }),
+  deleteUser: (email: string, reason: string) =>
+    api<{ ok: true }>(`/api/admin/users/${encodeURIComponent(email)}/delete`, { method: "POST", json: { reason } }),
   unban: (email: string, reason: string) =>
     api<{ ok: true }>(`/api/admin/users/${encodeURIComponent(email)}/unban`, { method: "POST", json: { reason } }),
   auditLogs: (p: { actor?: string; action?: string; lease?: string; from?: number; to?: number; page: number }) =>

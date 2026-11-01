@@ -3,7 +3,6 @@ import type { z } from "zod";
 import {
   createLeaseSchema,
   replaceRecordsSchema,
-  type LeaseAuditItem,
   type DriftItem,
   type LeaseDetail,
   type LeaseDnsState,
@@ -12,6 +11,7 @@ import {
   type NameAvailability,
   type RecheckResponse,
 } from "../../shared/schemas";
+import { NO_ID, type Database } from "../db";
 import type { Config } from "../env";
 import { apiError } from "../lib/http";
 import { requireUser } from "../middleware/auth";
@@ -84,15 +84,15 @@ function handleError(c: Context<HonoEnv>, err: unknown): Response {
 /** 자기 lease만 조회한다. 남의 lease는 존재 여부를 숨기기 위해 404. */
 async function ownLease(c: Context<HonoEnv>): Promise<LeaseRow | null> {
   const lease = await getLease(c.env.DB, c.req.param("id") ?? "");
-  return lease && lease.owner_email === c.var.user.email ? lease : null;
+  return lease && lease.owner_email === c.var.user.email && lease.owner_deleted_at == null ? lease : null;
 }
 
 /**
  * 상세 화면용 Cloudflare 실제 상태 (SPEC §9). active lease만 조회한다(호출 1회).
  * DB 값과 다르면 복구 작업을 예약한다. 매시 cron이 DB 값으로 맞춘다.
  */
-async function dnsStateOf(db: D1Database, dns: DnsClient, lease: LeaseRow, records: readonly RecordRow[]): Promise<LeaseDnsState> {
-  const pending = async () => (await db.prepare(`SELECT 1 FROM dns_ops WHERE lease_id = ? LIMIT 1`).bind(lease.id).first()) !== null;
+async function dnsStateOf(db: Database, dns: DnsClient, lease: LeaseRow, records: readonly RecordRow[]): Promise<LeaseDnsState> {
+  const pending = async () => (await db.dnsOps.findOne({ lease_id: lease.id })) !== null;
   if (lease.status !== "active") return { checked: false, reason: "not_active", items: [], repairPending: await pending() };
   if (dns.dryRun) return { checked: false, reason: "dry_run", items: [], repairPending: await pending() };
   let items: DriftItem[];
@@ -130,10 +130,10 @@ export const leaseRoutes = new Hono<HonoEnv>()
 
   .get("/", async (c) => {
     const db = c.env.DB;
-    const { results } = await db
-      .prepare(`SELECT * FROM leases WHERE owner_email = ? ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'suspended' THEN 0 ELSE 1 END, created_at DESC`)
-      .bind(c.var.user.email)
-      .all<LeaseRow>();
+    const found = await db.leases.find({ owner_email: c.var.user.email, owner_deleted_at: null }, NO_ID).sort({ created_at: -1 }).toArray();
+    // 사용 중·일시 중지를 먼저, 그 안에서는 최신순
+    const ended = (row: LeaseRow) => (row.status === "active" || row.status === "suspended" ? 0 : 1);
+    const results = found.sort((a, b) => ended(a) - ended(b));
     const records = await getRecordsByLease(db, results.map((r) => r.id));
     const now = Date.now();
     const body: LeasesResponse = {
@@ -148,19 +148,20 @@ export const leaseRoutes = new Hono<HonoEnv>()
     if (!lease) return notFound(c);
     const db = c.env.DB;
     const records = (await getRecordsByLease(db, [lease.id])).get(lease.id) ?? [];
-    const { results } = await db
-      .prepare(`SELECT id, at, actor_role, action, detail FROM audit_logs WHERE lease_id = ? ORDER BY at DESC, id DESC LIMIT 100`)
-      .bind(lease.id)
-      .all<{ id: number; at: number; actor_role: LeaseAuditItem["actorRole"]; action: LeaseAuditItem["action"]; detail: string | null }>();
+    const results = await db.auditLogs
+      .find({ lease_id: lease.id })
+      .sort({ at: -1, _id: -1 })
+      .limit(100)
+      .toArray();
     const body: LeaseDetail = {
       ...leaseItem(lease, records, c.var.config),
       dnsState: await dnsStateOf(db, createDnsClient(c.var.config), lease, records),
       auditLogs: results.map((r) => ({
-        id: r.id,
+        id: r._id.toHexString(),
         at: r.at,
         actorRole: r.actor_role,
         action: r.action,
-        detail: r.detail ? (JSON.parse(r.detail) as unknown) : null,
+        detail: r.detail,
       })),
     };
     return c.json(body);

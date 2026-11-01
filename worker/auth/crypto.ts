@@ -1,3 +1,5 @@
+import { timingSafeEqual as nodeTimingSafeEqual } from "node:crypto";
+
 const encoder = new TextEncoder();
 
 export function base64url(bytes: Uint8Array): string {
@@ -27,8 +29,8 @@ export function timingSafeEqual(a: string, b: string): boolean {
   const bb = encoder.encode(b);
   if (ab.byteLength !== bb.byteLength) {
     // 길이가 달라도 비교 시간을 일정하게 유지한다.
-    crypto.subtle.timingSafeEqual(ab, ab);
+    nodeTimingSafeEqual(ab, ab);
     return false;
   }
-  return crypto.subtle.timingSafeEqual(ab, bb);
+  return nodeTimingSafeEqual(ab, bb);
 }

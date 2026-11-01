@@ -5,7 +5,7 @@ import { createRemoteJWKSet, errors as joseErrors, jwtVerify } from "jose";
 import type { Config } from "../env";
 import type { LoginIdentity, SohakoeMembership } from "./login";
 
-export const IDP_SCOPES = "openid email profile student sohakoe";
+export const IDP_SCOPES = "openid email profile sohakoe";
 
 export type Fetcher = (input: string, init?: RequestInit) => Promise<Response>;
 
@@ -86,7 +86,6 @@ export interface IdpClaims {
   email: string;
   email_verified: boolean;
   name?: string;
-  studentId?: string;
   sohakoeMemberships: SohakoeMembership[];
 }
 
@@ -125,15 +124,12 @@ export async function verifyIdToken(config: Config, idToken: string, expectedNon
   if (typeof payload.sub !== "string" || typeof payload.email !== "string") {
     throw new OAuthError("id_token에 sub 또는 email이 없음");
   }
-  const student = payload.student as { id?: unknown } | undefined;
-  const studentId = text(student?.id);
   return {
     sub: payload.sub,
     email: payload.email,
     // boolean true가 아닌 값은 모두 미인증으로 취급한다.
     email_verified: payload.email_verified === true,
     ...(typeof payload.name === "string" ? { name: payload.name } : {}),
-    ...(studentId ? { studentId } : {}),
     sohakoeMemberships: parseMemberships(payload.sohakoe_memberships),
   };
 }
@@ -144,7 +140,6 @@ export function toIdentity(claims: IdpClaims): LoginIdentity {
     email: claims.email,
     emailVerified: claims.email_verified,
     name: claims.name,
-    studentId: claims.studentId,
     sohakoeMemberships: claims.sohakoeMemberships,
   };
 }

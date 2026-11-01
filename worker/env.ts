@@ -2,8 +2,40 @@
  * 환경 변수 파싱과 검증 (SPEC §4).
  *
  * - 개발 모드(APP_ORIGIN이 http://localhost:*)에서는 필수 조건을 완화한다.
- * - 운영 주소인데 개발용 플래그가 켜져 있으면 UnsafeConfigError를 던지고, fetch 핸들러는 모든 요청에 500을 반환한다.
+ * - 운영 주소인데 개발용 플래그가 켜져 있으면 UnsafeConfigError를 던지고, 요청 핸들러는 모든 요청에 500을 반환한다.
  */
+import type { Database } from "./db";
+
+/** 앱이 읽는 환경 변수 이름. Netlify 환경 변수(운영) 또는 .env(로컬)에서 온다. */
+export const VAR_NAMES = [
+  "APP_ORIGIN",
+  "ZONE_NAME",
+  "CF_ZONE_ID",
+  "CF_API_TOKEN",
+  "IDP_ISSUER",
+  "IDP_CLIENT_ID",
+  "IDP_CLIENT_SECRET",
+  "ALLOWED_EMAIL_DOMAIN",
+  "REQUIRED_SOHAKOE",
+  "ADMIN_EMAILS",
+  "MAX_LEASES_PER_USER",
+  "LEASE_DAYS",
+  "RENEW_WINDOW_DAYS",
+  "NAME_HOLD_DAYS",
+  "HEALTH_GRACE_DAYS",
+  "HEALTH_FAIL_THRESHOLD",
+  "EXTRA_RESERVED_NAMES",
+  "DNS_DRY_RUN",
+  "DEV_AUTH_DEBUG",
+  "DEV_FAKE_LOGIN",
+  "DB_CONNECTION_STRING",
+  "DB_NAME",
+] as const;
+
+export type VarName = (typeof VAR_NAMES)[number];
+
+/** 요청·cron 핸들러에 넘기는 실행 환경: DB 연결 + 문자열 변수 */
+export type Env = { DB: Database } & Partial<Record<VarName, string>>;
 
 export type AppEnv = Env;
 
@@ -122,6 +154,8 @@ export function parseConfig(env: AppEnv): Config {
   if ((!cfZoneId || !cfApiToken) && !(isDev && dnsDryRun)) {
     errors.push("CF_ZONE_ID와 CF_API_TOKEN이 필요합니다");
   }
+
+  if (!str(raw.DB_CONNECTION_STRING) || !str(raw.DB_NAME)) errors.push("DB_CONNECTION_STRING과 DB_NAME이 필요합니다");
 
   const zoneName = str(raw.ZONE_NAME).toLowerCase();
   if (!zoneName) errors.push("ZONE_NAME이 필요합니다");

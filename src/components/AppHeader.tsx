@@ -13,15 +13,19 @@ import {
   Tag,
 } from "@carbon/react";
 import { Logout } from "@carbon/icons-react";
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useSession } from "../session";
+import { useToast } from "./Toasts";
+import { WithdrawModal } from "./WithdrawModal";
 
 export function AppHeader() {
-  const { me, dev, logout } = useSession();
+  const { me, dev, logout, withdraw } = useSession();
+  const notify = useToast();
   const navigate = useNavigate();
   const location = useLocation();
   const [sideNavOpen, setSideNavOpen] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
 
   const navItems = me
     ? [
@@ -33,6 +37,12 @@ export function AppHeader() {
   const onLogout = async () => {
     await logout();
     navigate("/login", { replace: true });
+  };
+
+  const openWithdraw = (e: MouseEvent) => {
+    e.preventDefault();
+    setSideNavOpen(false);
+    setWithdrawing(true);
   };
 
   return (
@@ -68,6 +78,14 @@ export function AppHeader() {
               {item.label}
             </HeaderMenuItem>
           ))}
+          {me?.consentUrl && (
+            <HeaderMenuItem href={me.consentUrl} target="_blank" rel="noreferrer">
+              B-CUBE 통합 로그인 동의 관리
+            </HeaderMenuItem>
+          )}
+          <HeaderMenuItem href="#" onClick={openWithdraw}>
+            회원 탈퇴
+          </HeaderMenuItem>
         </HeaderNavigation>
       )}
       {navItems.length > 0 && (
@@ -79,6 +97,14 @@ export function AppHeader() {
                   {item.label}
                 </HeaderMenuItem>
               ))}
+              {me?.consentUrl && (
+                <HeaderMenuItem href={me.consentUrl} target="_blank" rel="noreferrer" onClick={() => setSideNavOpen(false)}>
+                  B-CUBE 통합 로그인 동의 관리
+                </HeaderMenuItem>
+              )}
+              <HeaderMenuItem href="#" onClick={openWithdraw}>
+                회원 탈퇴
+              </HeaderMenuItem>
             </HeaderSideNavItems>
           </SideNavItems>
         </SideNav>
@@ -89,6 +115,20 @@ export function AppHeader() {
             <Logout size={20} />
           </HeaderGlobalAction>
         </HeaderGlobalBar>
+      )}
+      {me && (
+        <WithdrawModal
+          open={withdrawing}
+          email={me.email}
+          liveLeases={me.limits.used}
+          onClose={() => setWithdrawing(false)}
+          onConfirm={async () => {
+            await withdraw(me.email);
+            setWithdrawing(false);
+            notify("success", "탈퇴했습니다", "회원 정보를 삭제했습니다.");
+            navigate("/login", { replace: true });
+          }}
+        />
       )}
     </Header>
   );

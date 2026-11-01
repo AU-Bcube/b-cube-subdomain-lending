@@ -1,34 +1,14 @@
-import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
 
-// vite.config.ts의 cloudflare() 플러그인과 충돌하지 않도록 테스트 설정을 분리한다.
-// 테스트는 workerd 안에서 실행된다.
+// vite.config.ts의 netlify() 플러그인을 불러오지 않도록 테스트 설정을 분리한다.
+// 테스트는 Node에서 실행되며, 테스트용 MongoDB에 파일마다 새 DB를 만든다(test/global-setup.ts, test/env.ts).
 export default defineConfig({
-  plugins: [
-    cloudflareTest(async () => ({
-      wrangler: { configPath: "./wrangler.jsonc" },
-      miniflare: {
-        // 개인 .dev.vars, 운영 값을 채운 wrangler.jsonc vars와 무관하게 테스트 설정을 고정한다.
-        bindings: {
-          APP_ORIGIN: "http://localhost:5173",
-          DNS_DRY_RUN: "true",
-          DEV_FAKE_LOGIN: "false",
-          DEV_AUTH_DEBUG: "false",
-          IDP_ISSUER: "https://idp.test",
-          IDP_CLIENT_ID: "test-client-id",
-          IDP_CLIENT_SECRET: "test-client-secret",
-          REQUIRED_SOHAKOE: "B-cube",
-          CF_ZONE_ID: "",
-          CF_API_TOKEN: "",
-          ADMIN_EMAILS: "t-admin@ajou.ac.kr",
-          EXTRA_RESERVED_NAMES: "",
-          TEST_MIGRATIONS: await readD1Migrations("./migrations"),
-        },
-      },
-    })),
-  ],
   test: {
     include: ["test/**/*.test.ts"],
-    setupFiles: ["./test/apply-migrations.ts"],
+    environment: "node",
+    globalSetup: ["./test/global-setup.ts"],
+    setupFiles: ["./test/setup.ts"],
+    testTimeout: 15_000,
+    hookTimeout: 30_000,
   },
 });

@@ -29,7 +29,7 @@ import { useSession } from "../../session";
 
 const HEADERS = ["이메일", "이름", "보유 (사용 중 / 전체)", "마지막 로그인", "상태", "작업"];
 
-type Pending = { kind: "ban" | "unban"; user: AdminUserItem };
+type Pending = { kind: "ban" | "unban" | "delete"; user: AdminUserItem };
 
 export function UsersTab() {
   const { me } = useSession();
@@ -130,9 +130,14 @@ export function UsersTab() {
                         </Button>
                       ) : (
                         user.email !== me?.email && (
-                          <Button kind="danger--ghost" size="sm" onClick={() => setPending({ kind: "ban", user })}>
-                            차단
-                          </Button>
+                          <>
+                            <Button kind="danger--ghost" size="sm" onClick={() => setPending({ kind: "ban", user })}>
+                              차단
+                            </Button>
+                            <Button kind="danger--ghost" size="sm" onClick={() => setPending({ kind: "delete", user })}>
+                              회원 정보 삭제
+                            </Button>
+                          </>
                         )
                       )}
                     </TableCell>
@@ -166,6 +171,27 @@ export function UsersTab() {
           <p>
             <strong>{pending.user.email}</strong>을(를) 차단합니다. 모든 세션이 즉시 끊기고, 사용 중·일시 중지 상태의 서브도메인{" "}
             {pending.user.liveLeaseCount}개가 회수됩니다(사유: 사용자 차단). 차단을 해제해도 회수한 서브도메인은 복구되지 않습니다.
+          </p>
+        )}
+      </ReasonModal>
+
+      <ReasonModal
+        open={pending?.kind === "delete"}
+        danger
+        heading="회원 정보 삭제"
+        primaryText="삭제"
+        onClose={() => setPending(null)}
+        onSubmit={async (reason) => {
+          if (!pending) return;
+          await adminApi.deleteUser(pending.user.email, reason);
+          notify("success", "회원 정보를 삭제했습니다", pending.user.email);
+          reload();
+        }}
+      >
+        {pending?.kind === "delete" && (
+          <p>
+            <strong>{pending.user.email}</strong>의 회원 정보와 세션을 삭제합니다. 사용 중·일시 중지 상태의 서브도메인 {pending.user.liveLeaseCount}개는 DNS
+            레코드를 지우고 회수합니다. 감사 로그와 서브도메인 기록(DNS 레코드 내용 포함)은 그대로 남고, 이 작업은 되돌릴 수 없습니다.
           </p>
         )}
       </ReasonModal>

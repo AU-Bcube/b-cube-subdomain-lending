@@ -1,4 +1,4 @@
-import { env } from "cloudflare:test";
+import { env } from "./env";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LeaseDetail, LeaseItem, LeasesResponse } from "../shared/schemas";
 import {
@@ -23,18 +23,11 @@ const nm = (prefix = "t") => `${prefix}-${uid()}`;
 const vercelRecords = (name: string) => [{ type: "CNAME", host: fq(name), content: "cname.vercel-dns.com" }];
 
 async function leaseRow(id: string) {
-  return env.DB.prepare(`SELECT * FROM leases WHERE id = ?`).bind(id).first<{
-    status: string;
-    ended_at: number | null;
-    expires_at: number;
-  }>();
+  return env.DB.leases.findOne({ id });
 }
 
 async function recordRows(leaseId: string) {
-  const { results } = await env.DB.prepare(`SELECT * FROM records WHERE lease_id = ? ORDER BY created_at, id`)
-    .bind(leaseId)
-    .all<{ id: string; cf_record_id: string | null; type: string; host: string; content: string }>();
-  return results;
+  return env.DB.records.find({ lease_id: leaseId }).sort({ created_at: 1, id: 1 }).toArray();
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -261,7 +254,7 @@ describe("Cloudflare 호출 순서와 롤백 (live 모드)", () => {
       "DELETE cf-1",
     ]);
     expect(cf.records.size).toBe(0);
-    expect(await env.DB.prepare(`SELECT 1 FROM leases WHERE name = ?`).bind(name).first()).toBeNull();
+    expect(await env.DB.leases.findOne({ name })).toBeNull();
   });
 
   it("교체: 같은 레코드 유지, CNAME은 PATCH, 새 레코드 생성 → DB 갱신 → 기존 레코드 삭제", async () => {
@@ -415,5 +408,25 @@ describe("GET /api/leases, /api/leases/:id", () => {
     expect(detail.auditLogs).toEqual([expect.objectContaining({ action: "lease.renew", actorRole: "user" })]);
     expect(detail.auditLogs[0]).not.toHaveProperty("actorEmail");
     expect(detail.auditLogs[0]).not.toHaveProperty("ip");
+  });
+});
+
+describe("이름 유일 인덱스 (uq_leases_name_live)", () => {
+  it("같은 이름은 사용 중·일시 중지로 하나만 존재하고, 종료된 이름은 겹쳐도 된다", async () => {
+    const name = `dup-${uid()}`;
+    const owner = `dup-${uid()}@ajou.ac.kr`;
+    await createLease({ name, owner, status: "released" });
+    await createLease({ name, owner, status: "expired" });
+    await createLease({ name, owner, status: "active" });
+    await expect(createLease({ name, owner, status: "suspended" })).rejects.toThrow(/E11000/);
+  });
+
+  it("동시에 같은 이름을 만들면 하나만 성공하고 나머지는 409 taken", async () => {
+    const name = `race-${uid()}`;
+    const body = { name, targetKind: "ip", records: [{ type: "A", host: `${name}.b-cube.kr`, content: "8.8.8.8" }] };
+    const sessions = await Promise.all([login(`r1-${uid()}@ajou.ac.kr`), login(`r2-${uid()}@ajou.ac.kr`)]);
+    const results = await Promise.all(sessions.map((session) => call("/api/leases", { method: "POST", session, body })));
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+    expect(await env.DB.leases.countDocuments({ name })).toBe(1);
   });
 });

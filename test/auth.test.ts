@@ -1,4 +1,4 @@
-import { env, SELF } from "cloudflare:test";
+import { env, SELF } from "./env";
 import { exportJWK, generateKeyPair, SignJWT, type JWTPayload } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { sha256Base64url } from "../worker/auth/crypto";
@@ -6,7 +6,7 @@ import { evaluateLogin } from "../worker/auth/login";
 import { parseConfig } from "../worker/env";
 import { auditFor, call, createLease, createUser, login, ORIGIN, uid, workerWith } from "./helpers";
 
-const CLIENT_ID = "test-client-id"; // vitest.config.ts 바인딩과 같은 값
+const CLIENT_ID = "test-client-id"; // test/env.ts와 같은 값
 const CLIENT_SECRET = "test-client-secret";
 const ISSUER = "https://idp.test";
 const PROD_ORIGIN = "https://domain.b-cube.kr";
@@ -141,7 +141,7 @@ describe("GET /auth/login", () => {
     expect(p.get("response_type")).toBe("code");
     expect(p.get("client_id")).toBe(CLIENT_ID);
     expect(p.get("redirect_uri")).toBe(`${ORIGIN}/auth/callback`);
-    expect(p.get("scope")).toBe("openid email profile student sohakoe");
+    expect(p.get("scope")).toBe("openid email profile sohakoe");
     expect(p.has("hd")).toBe(false);
     expect(p.has("prompt")).toBe(false);
     expect(p.get("code_challenge_method")).toBe("S256");
@@ -194,13 +194,15 @@ describe("GET /auth/callback — 허용", () => {
     expect(me.status).toBe(200);
     expect(await me.json()).toMatchObject({ email, isAdmin: false });
 
-    const user = await env.DB.prepare(`SELECT idp_sub, name, student_id, sohakoe_memberships FROM users WHERE email = ?`).bind(email).first();
-    expect(user).toEqual({
+    const user = await env.DB.users.findOne({ email });
+    expect(user).toMatchObject({
       idp_sub: `google-${email}`,
       name: "테스트",
-      student_id: "202600123",
-      sohakoe_memberships: JSON.stringify([{ name: "B-Cube", year: "2026", semester: "10" }]),
+      sohakoe_memberships: [{ name: "B-Cube", year: "2026", semester: "10" }],
     });
+    // 토큰에 학적 정보가 있어도 저장하지 않는다.
+    expect(user).not.toHaveProperty("student_id");
+    expect(user).not.toHaveProperty("student");
     const logs = await auditFor({ action: "auth.login", targetEmail: email });
     expect(logs).toHaveLength(1);
     expect(logs[0]?.detail).toBeNull(); // 실제 로그인은 dev 표시 없음
@@ -210,7 +212,7 @@ describe("GET /auth/callback — 허용", () => {
     const id = uid();
     const { callback } = await oauthLogin(idpClaims(`Mixed-${id}@AJOU.ac.kr`));
     expect(location(callback)).toBe("/");
-    const row = await env.DB.prepare(`SELECT email FROM users WHERE email = ?`).bind(`mixed-${id}@ajou.ac.kr`).first();
+    const row = await env.DB.users.findOne({ email: `mixed-${id}@ajou.ac.kr` });
     expect(row).toBeTruthy();
   });
 
@@ -220,8 +222,8 @@ describe("GET /auth/callback — 허용", () => {
     const leaseId = await createLease({ name: `link-${uid()}`, owner: email });
     const { callback } = await oauthLogin(idpClaims(email, { sub: `new-sub-${email}` }));
     expect(location(callback)).toBe("/");
-    const user = await env.DB.prepare(`SELECT idp_sub, name FROM users WHERE email = ?`).bind(email).first();
-    expect(user).toEqual({ idp_sub: `new-sub-${email}`, name: "테스트" });
+    const user = await env.DB.users.findOne({ email });
+    expect(user).toMatchObject({ idp_sub: `new-sub-${email}`, name: "테스트" });
     const session = setCookies(callback).get("bcd_session");
     const res = await SELF.fetch(`${ORIGIN}/api/leases/${leaseId}`, { headers: { Cookie: `bcd_session=${session}` } });
     expect(res.status).toBe(200);
@@ -237,7 +239,7 @@ describe("GET /auth/callback — 허용", () => {
     const session = setCookies(callback).get("bcd_session");
     const me = await SELF.fetch(`${ORIGIN}/api/me`, { headers: { Cookie: `bcd_session=${session}` } });
     expect(await me.json()).toMatchObject({ email: oldEmail });
-    expect(await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(newEmail).first()).toBeNull();
+    expect(await env.DB.users.findOne({ email: newEmail })).toBeNull();
   });
 
   it("소학회 이름은 대소문자를 구분하지 않고, 기간은 보지 않는다", async () => {
@@ -259,6 +261,13 @@ describe("GET /auth/callback — 허용", () => {
     expect(location(callback)).toBe("/");
     const logs = await auditFor({ action: "auth.login", targetEmail: email });
     expect(logs.at(-1)?.actor_role).toBe("admin");
+  });
+});
+
+describe("GET /api/me", () => {
+  it("IdP 동의 관리 주소를 issuer에서 만들어 돌려준다", async () => {
+    const res = await call("/api/me", { session: await login(`me-${uid()}@ajou.ac.kr`) });
+    expect(((await res.json()) as { consentUrl: string }).consentUrl).toBe(`${ISSUER}/consents`);
   });
 });
 
@@ -313,7 +322,7 @@ describe("GET /auth/callback — 거부", () => {
   it("거부된 사용자는 저장하지 않는다", async () => {
     const email = `nosave-${uid()}@ajou.ac.kr`;
     await expectDenied(idpClaims(email, { sohakoe_memberships: [] }), "sohakoe_required");
-    expect(await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(email).first()).toBeNull();
+    expect(await env.DB.users.findOne({ email })).toBeNull();
   });
 
   it("차단된 사용자는 email이 바뀌어도 sub로 거부한다", async () => {
@@ -382,7 +391,7 @@ describe("GET /auth/callback — OAuth 흐름 오류", () => {
       const { callback } = await oauthLogin(claims(email));
       expect(location(callback)).toBe("/login?error=oauth_failed");
       expect(setCookies(callback).has("bcd_session")).toBe(false);
-      expect(await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(email).first()).toBeNull();
+      expect(await env.DB.users.findOne({ email })).toBeNull();
     });
   }
 
@@ -496,7 +505,7 @@ describe("개발 기능 차단", () => {
   }
 
   it("localhost라도 플래그가 꺼져 있으면 dev-login, debug는 404", async () => {
-    // vitest.config.ts: DEV_FAKE_LOGIN=false, DEV_AUTH_DEBUG=false
+    // test/env.ts: DEV_FAKE_LOGIN=false, DEV_AUTH_DEBUG=false
     for (const path of ["/auth/dev-login?as=admin", "/auth/debug"]) {
       expect((await SELF.fetch(`${ORIGIN}${path}`, { redirect: "manual" })).status, path).toBe(404);
     }
@@ -505,7 +514,7 @@ describe("개발 기능 차단", () => {
   it("dev-login?as=banned는 실제 로그인과 같은 거부 흐름 (리다이렉트, 감사 로그)", async () => {
     const fetcher = workerWith({ DEV_FAKE_LOGIN: "true" });
     const email = "banned@ajou.ac.kr";
-    const exists = await env.DB.prepare(`SELECT 1 FROM users WHERE email = ?`).bind(email).first();
+    const exists = await env.DB.users.findOne({ email });
     if (!exists) await createUser(email, { banned: true });
 
     const dev = await fetcher(new Request(`${ORIGIN}/auth/dev-login?as=banned`, { redirect: "manual" }));

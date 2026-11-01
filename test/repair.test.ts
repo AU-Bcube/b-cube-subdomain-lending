@@ -1,13 +1,12 @@
-import { createExecutionContext, createScheduledController, env, waitOnExecutionContext } from "cloudflare:test";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { DriftResponse, LeaseDetail, LeaseItem } from "../shared/schemas";
-import { CRON_HEALTH } from "../worker/cron";
-import worker from "../worker/index";
+import { handleScheduled } from "../worker/index";
 import { parseConfig } from "../worker/env";
 import { createDnsClient, type DnsClient } from "../worker/services/cloudflare-dns";
 import { OP_MAX_ATTEMPTS, OP_STALE_MS, queueRepair } from "../worker/services/dns-ops";
 import { RECOVER_LOCK_MS } from "../worker/services/job-lock";
 import { recoverPendingOps, repairLease } from "../worker/services/repair";
+import { env } from "./env";
 import { ADMIN_EMAIL, auditFor, call, createLease, fakeCloudflare, LIVE_DNS, login, uid, workerWith, type FakeCloudflare, type Session } from "./helpers";
 
 const ZONE = "b-cube.kr";
@@ -18,29 +17,16 @@ const via = workerWith(LIVE_DNS);
 const later = () => Date.now() + OP_STALE_MS + 1000;
 
 async function ops(leaseId: string) {
-  const { results } = await env.DB.prepare(`SELECT * FROM dns_ops WHERE lease_id = ?`).bind(leaseId).all<{
-    kind: string;
-    cf_ids: string;
-    attempts: number;
-    last_error: string | null;
-  }>();
-  return results;
+  return env.DB.dnsOps.find({ lease_id: leaseId }).toArray();
 }
 
 async function cfIds(leaseId: string) {
-  const { results } = await env.DB.prepare(`SELECT cf_record_id FROM records WHERE lease_id = ? ORDER BY created_at, id`)
-    .bind(leaseId)
-    .all<{ cf_record_id: string | null }>();
+  const results = await env.DB.records.find({ lease_id: leaseId }).sort({ created_at: 1, id: 1 }).toArray();
   return results.map((r) => r.cf_record_id);
 }
 
 afterEach(() => vi.restoreAllMocks());
 
-async function runCron(cron: string) {
-  const ctx = createExecutionContext();
-  await worker.scheduled(createScheduledController({ cron, scheduledTime: Date.now() }), env, ctx);
-  await waitOnExecutionContext(ctx);
-}
 
 describe("DNS 작업 기록과 복구 (live 모드)", () => {
   let cf: FakeCloudflare;
@@ -49,7 +35,7 @@ describe("DNS 작업 기록과 복구 (live 모드)", () => {
 
   beforeEach(async () => {
     cf = fakeCloudflare(vi.spyOn(globalThis, "fetch"));
-    dns = createDnsClient(parseConfig({ ...env, ...LIVE_DNS } as unknown as Env));
+    dns = createDnsClient(parseConfig({ ...env, ...LIVE_DNS } ));
     s = await login(`rp-${uid()}@ajou.ac.kr`);
   });
 
@@ -75,7 +61,7 @@ describe("DNS 작업 기록과 복구 (live 모드)", () => {
     const res = await call(`/api/leases/${lease.id}/records`, { method: "PUT", session: s, via, body: { records: [{ type: "A", host: fq(name), content: "4.4.4.4" }] } });
     expect(res.status).toBe(200);
     expect(cf.records.has(oldId!)).toBe(true);
-    expect((await ops(lease.id)).map((o) => [o.kind, JSON.parse(o.cf_ids)])).toEqual([["replace", [oldId]]]);
+    expect((await ops(lease.id)).map((o) => [o.kind, o.cf_ids])).toEqual([["replace", [oldId]]]);
 
     cf.failWhen = null;
     // 진행 중일 수 있는 작업은 건드리지 않는다
@@ -99,8 +85,8 @@ describe("DNS 작업 기록과 복구 (live 모드)", () => {
     const leftover = [...cf.records.values()].filter((r) => r.name === fq(name));
     expect(leftover).toHaveLength(1);
     const leaseId = leftover[0]!.comment!.slice("bcd:lease=".length);
-    expect(await env.DB.prepare(`SELECT 1 FROM leases WHERE id = ?`).bind(leaseId).first()).toBeNull();
-    expect((await ops(leaseId)).map((o) => JSON.parse(o.cf_ids))).toEqual([[leftover[0]!.id]]);
+    expect(await env.DB.leases.findOne({ id: leaseId })).toBeNull();
+    expect((await ops(leaseId)).map((o) => o.cf_ids)).toEqual([[leftover[0]!.id]]);
 
     cf.failWhen = null;
     await recoverPendingOps(env.DB, dns, later());
@@ -132,7 +118,7 @@ describe("DNS 작업 기록과 복구 (live 모드)", () => {
 
   it("복구 실패는 시도 횟수와 오류를 남기고, 상한을 넘으면 더 시도하지 않는다", async () => {
     const leaseId = await createLease({ name: nm(), owner: s.email, records: [{ type: "A", host: fq("x"), content: "3.3.3.3", cfRecordId: "cf-missing" }] });
-    await env.DB.prepare(`INSERT INTO dns_ops (id, lease_id, kind, started_at) VALUES (?, ?, 'repair', 0)`).bind(uid(), leaseId).run();
+    await env.DB.dnsOps.insertOne({ id: uid(), lease_id: leaseId, kind: "repair", cf_ids: [], started_at: 0, attempts: 0, last_error: null });
     cf.failWhen = (method) => method === "POST";
     for (let i = 0; i < OP_MAX_ATTEMPTS + 1; i++) await recoverPendingOps(env.DB, dns, later());
     const [op] = await ops(leaseId);
@@ -144,7 +130,7 @@ describe("DNS 작업 기록과 복구 (live 모드)", () => {
     const name = nm();
     const lease = await create(name, [{ type: "A", host: fq(name), content: "3.3.3.3" }]);
     cf.records.set("hand-made", { id: "hand-made", type: "TXT", name: fq(name), content: "x", proxied: false, comment: `bcd:lease=${lease.id}` });
-    await env.DB.prepare(`UPDATE leases SET status = 'revoked' WHERE id = ?`).bind(lease.id).run();
+    await env.DB.leases.updateOne({ id: lease.id }, { $set: { status: "revoked" } });
     const r = await repairLease(env.DB, dns, lease.id);
     expect(r.removed).toBe(1);
     expect(cf.records.has("hand-made")).toBe(true);
@@ -192,7 +178,8 @@ describe("수동 복구 (POST /api/admin/dns-ops/recover)", () => {
   beforeEach(async () => {
     cf = fakeCloudflare(vi.spyOn(globalThis, "fetch"));
     admin = await login(ADMIN_EMAIL);
-    await env.DB.batch([env.DB.prepare(`DELETE FROM job_locks`), env.DB.prepare(`DELETE FROM dns_ops`)]);
+    await env.DB.jobLocks.deleteMany({});
+    await env.DB.dnsOps.deleteMany({});
   });
 
   const recover = () => call("/api/admin/dns-ops/recover", { method: "POST", session: admin, via });
@@ -210,9 +197,7 @@ describe("수동 복구 (POST /api/admin/dns-ops/recover)", () => {
 
   it("시도 상한을 넘은 작업과 복구 예약을 바로 처리하고 감사 로그를 남긴다", async () => {
     const exhausted = await missingRecordLease();
-    await env.DB.prepare(`INSERT INTO dns_ops (id, lease_id, kind, started_at, attempts) VALUES (?, ?, 'replace', 0, ?)`)
-      .bind(uid(), exhausted, OP_MAX_ATTEMPTS)
-      .run();
+    await env.DB.dnsOps.insertOne({ id: uid(), lease_id: exhausted, kind: "replace", cf_ids: [], started_at: 0, attempts: OP_MAX_ATTEMPTS, last_error: null });
     const queued = await missingRecordLease();
     await queueRepair(env.DB, queued);
 
@@ -229,7 +214,7 @@ describe("수동 복구 (POST /api/admin/dns-ops/recover)", () => {
 
   it("시작한 지 10분이 안 된 작업은 진행 중일 수 있어 건너뛴다", async () => {
     const leaseId = await missingRecordLease();
-    await env.DB.prepare(`INSERT INTO dns_ops (id, lease_id, kind, started_at) VALUES (?, ?, 'replace', ?)`).bind(uid(), leaseId, Date.now()).run();
+    await env.DB.dnsOps.insertOne({ id: uid(), lease_id: leaseId, kind: "replace", cf_ids: [], started_at: Date.now(), attempts: 0, last_error: null });
     expect(await (await recover()).json()).toMatchObject({ recovered: 0 });
     expect(await ops(leaseId)).toHaveLength(1);
   });
@@ -245,28 +230,52 @@ describe("수동 복구 (POST /api/admin/dns-ops/recover)", () => {
     expect(drift.recoverLock).toMatchObject({ trigger: "manual", availableAt: expect.any(Number) });
 
     // 3분이 지나면 다시 가능
-    await env.DB.prepare(`UPDATE job_locks SET started_at = started_at - ?`).bind(RECOVER_LOCK_MS).run();
+    await env.DB.jobLocks.updateMany({}, { $inc: { started_at: -RECOVER_LOCK_MS } });
     expect((await recover()).status).toBe(200);
   });
 
   it("cron 실행 직후에는 수동 복구를 막고, 수동 복구 직후의 cron은 작업 기록 복구를 건너뛴다", async () => {
     // 헬스체크 대상이 없게 해 외부 요청 없이 작업 기록 복구 단계만 확인한다(24시간 안에 검사한 lease는 건너뜀).
-    await env.DB.prepare(`UPDATE leases SET last_health_check_at = ?`).bind(Date.now()).run();
-    await runCron(CRON_HEALTH);
+    await env.DB.leases.updateMany({}, { $set: { last_health_check_at: Date.now() } });
+    await handleScheduled("health", env);
     const blocked = await recover();
     expect(blocked.status).toBe(429);
     expect(((await blocked.json()) as { error: { message: string } }).error.message).toContain("정기 복구");
 
-    await env.DB.prepare(`DELETE FROM job_locks`).run();
+    await env.DB.jobLocks.deleteMany({});
     expect((await recover()).status).toBe(200);
     const leaseId = await missingRecordLease();
-    await env.DB.prepare(`INSERT INTO dns_ops (id, lease_id, kind, started_at) VALUES (?, ?, 'repair', 0)`).bind(uid(), leaseId).run();
-    await runCron(CRON_HEALTH);
+    await env.DB.dnsOps.insertOne({ id: uid(), lease_id: leaseId, kind: "repair", cf_ids: [], started_at: 0, attempts: 0, last_error: null });
+    await handleScheduled("health", env);
     expect(await ops(leaseId)).toHaveLength(1);
   });
 
   it("관리자만 실행할 수 있다", async () => {
     const user = await login(`ru-${uid()}@ajou.ac.kr`);
     expect((await call("/api/admin/dns-ops/recover", { method: "POST", session: user })).status).toBe(403);
+  });
+});
+
+describe("회원 정보 삭제 (live 모드)", () => {
+  it("Cloudflare 레코드 삭제가 실패하면 회원 정보를 지우지 않고, 다시 하면 이어서 처리한다", async () => {
+    const cf = fakeCloudflare(vi.spyOn(globalThis, "fetch"));
+    const email = `wd-${uid()}@ajou.ac.kr`;
+    const session = await login(email);
+    const name = nm();
+    const created = await call("/api/leases", { method: "POST", session, via, body: { name, targetKind: "ip", records: [{ type: "A", host: fq(name), content: "5.5.5.5" }] } });
+    const lease = (await created.json()) as LeaseItem;
+    const [cfId] = await cfIds(lease.id);
+
+    cf.failWhen = (method) => method === "DELETE";
+    const failed = await call("/api/me", { method: "DELETE", session, via, body: { confirmEmail: email } });
+    expect(failed.status).toBe(502);
+    expect(await env.DB.users.findOne({ email })).not.toBeNull();
+    expect((await env.DB.leases.findOne({ id: lease.id }))?.owner_email).toBe(email);
+
+    cf.failWhen = null;
+    const ok = await call("/api/me", { method: "DELETE", session, via, body: { confirmEmail: email } });
+    expect(ok.status).toBe(200);
+    expect(cf.records.has(cfId!)).toBe(false);
+    expect(await env.DB.users.findOne({ email })).toBeNull();
   });
 });

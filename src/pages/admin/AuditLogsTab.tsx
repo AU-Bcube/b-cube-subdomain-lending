@@ -34,7 +34,7 @@ export function AuditLogsTab() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
-  const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set());
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const actorQ = useDebounced(actor.trim());
   const leaseQ = useDebounced(lease.trim());
   const { data, loading, error } = useAsync(
@@ -54,7 +54,7 @@ export function AuditLogsTab() {
     set(v);
     setPage(1);
   };
-  const toggle = (id: number) =>
+  const toggle = (id: string) =>
     setExpanded((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);

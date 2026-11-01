@@ -19,6 +19,7 @@ import {
 import type { NameAvailability, RecordView } from "../../shared/schemas";
 import { BANNED_WORDS } from "../data/banned-words";
 import { RESERVED_NAMES } from "../data/reserved-names";
+import { isDuplicateKey, NO_ID, type Database, type Write } from "../db";
 import type { Config } from "../env";
 import { auditStatement, type AuditEntry } from "./audit";
 import type { DnsClient, DnsRecordData } from "./cloudflare-dns";
@@ -40,6 +41,8 @@ export interface LeaseRow {
   last_health_check_at: number | null;
   last_health_ok_at: number | null;
   last_health_detail: string | null;
+  /** 소유자가 탈퇴했거나 관리자가 회원 정보를 삭제한 시각. 있으면 소유자 화면에 보이지 않는다. */
+  owner_deleted_at?: number | null;
 }
 
 export interface RecordRow {
@@ -61,19 +64,18 @@ export class LeaseStateError extends Error {
 
 export const LIVE_STATUSES: readonly LeaseStatus[] = ["active", "suspended"];
 
-export async function getLease(db: D1Database, id: string): Promise<LeaseRow | null> {
-  return db.prepare(`SELECT * FROM leases WHERE id = ?`).bind(id).first<LeaseRow>();
+export async function getLease(db: Database, id: string): Promise<LeaseRow | null> {
+  return db.leases.findOne({ id }, NO_ID);
 }
 
 /** lease id별 레코드. 생성 순서대로 정렬한다. */
-export async function getRecordsByLease(db: D1Database, leaseIds: readonly string[]): Promise<Map<string, RecordRow[]>> {
+export async function getRecordsByLease(db: Database, leaseIds: readonly string[]): Promise<Map<string, RecordRow[]>> {
   const map = new Map<string, RecordRow[]>(leaseIds.map((id) => [id, []]));
   if (leaseIds.length === 0) return map;
-  const placeholders = leaseIds.map(() => "?").join(", ");
-  const { results } = await db
-    .prepare(`SELECT * FROM records WHERE lease_id IN (${placeholders}) ORDER BY created_at, id`)
-    .bind(...leaseIds)
-    .all<RecordRow>();
+  const results = await db.records
+    .find({ lease_id: { $in: [...leaseIds] } }, NO_ID)
+    .sort({ created_at: 1, id: 1 })
+    .toArray();
   for (const row of results) map.get(row.lease_id)?.push(row);
   return map;
 }
@@ -98,7 +100,7 @@ export function recordSnapshot(row: RecordRow) {
  * Cloudflare에서 레코드를 지운다. 지운 레코드는 DB에서 cf_record_id를 NULL로 바꾼다.
  * 중간에 실패해도 이미 지운 레코드는 DB에 반영한 뒤 오류를 다시 던진다.
  */
-export async function removeFromCloudflare(db: D1Database, dns: DnsClient, records: readonly RecordRow[]): Promise<void> {
+export async function removeFromCloudflare(db: Database, dns: DnsClient, records: readonly RecordRow[]): Promise<void> {
   const removed: string[] = [];
   try {
     for (const record of records) {
@@ -109,11 +111,7 @@ export async function removeFromCloudflare(db: D1Database, dns: DnsClient, recor
   } finally {
     if (removed.length > 0) {
       const now = Date.now();
-      await db.batch(
-        removed.map((id) =>
-          db.prepare(`UPDATE records SET cf_record_id = NULL, updated_at = ? WHERE id = ?`).bind(now, id),
-        ),
-      );
+      await db.records.updateMany({ id: { $in: removed } }, { $set: { cf_record_id: null, updated_at: now } });
     }
   }
 }
@@ -130,7 +128,7 @@ export interface Actor {
  * DB records는 이력으로 남긴다(cf_record_id = NULL).
  */
 export async function revokeLease(
-  db: D1Database,
+  db: Database,
   dns: DnsClient,
   lease: LeaseRow,
   reason: string,
@@ -146,12 +144,13 @@ export async function revokeLease(
   const now = Date.now();
   await db.batch([
     op.finishStatement(),
-    db
-      .prepare(
-        `UPDATE leases SET status = 'revoked', status_reason = ?, ended_at = ?
-          WHERE id = ? AND status IN ('active', 'suspended')`,
-      )
-      .bind(reason, now, lease.id),
+    db.write((session) =>
+      db.leases.updateOne(
+        { id: lease.id, status: { $in: ["active", "suspended"] } },
+        { $set: { status: "revoked", status_reason: reason, ended_at: now } },
+        { session },
+      ),
+    ),
     auditStatement(db, {
       action: "admin.revoke",
       actorEmail: actor.email,
@@ -201,12 +200,8 @@ export function nameLists(config: Config): NameLists {
   };
 }
 
-export async function countLiveLeases(db: D1Database, email: string): Promise<number> {
-  const row = await db
-    .prepare(`SELECT COUNT(*) AS n FROM leases WHERE owner_email = ? AND status IN ('active','suspended')`)
-    .bind(email)
-    .first<{ n: number }>();
-  return row?.n ?? 0;
+export async function countLiveLeases(db: Database, email: string): Promise<number> {
+  return db.leases.countDocuments({ owner_email: email, status: { $in: ["active", "suspended"] } });
 }
 
 /**
@@ -214,7 +209,7 @@ export async function countLiveLeases(db: D1Database, email: string): Promise<nu
  * Cloudflare 조회는 앞 단계를 모두 통과했을 때만 한다.
  */
 export async function checkAvailability(
-  db: D1Database,
+  db: Database,
   dns: DnsClient,
   config: Config,
   name: string,
@@ -224,10 +219,7 @@ export async function checkAvailability(
   const staticReason = checkName(name, nameLists(config));
   if (staticReason) return { available: false, reason: staticReason };
 
-  const { results } = await db
-    .prepare(`SELECT owner_email, status, ended_at FROM leases WHERE name = ?`)
-    .bind(name)
-    .all<{ owner_email: string; status: LeaseStatus; ended_at: number | null }>();
+  const results = await db.leases.find({ name }, { projection: { _id: 0, owner_email: 1, status: 1, ended_at: 1 } }).toArray();
   const holdReason = checkNameHold(
     results.map((r) => ({ ownerEmail: r.owner_email, status: r.status, endedAt: r.ended_at })),
     requesterEmail,
@@ -269,7 +261,7 @@ export function rowToNormalized(row: RecordRow): NormalizedRecord {
 
 interface AppliedRecordSet {
   /** DB에 반영할 문장 (레코드 삭제·수정·추가) */
-  statements: D1PreparedStatement[];
+  statements: Write[];
   /** DB 반영 후 Cloudflare에서 지울 기존 레코드 */
   toRemove: RecordRow[];
   /** DB 반영이 실패했을 때 Cloudflare 변경을 되돌린다. 모두 되돌렸으면 true */
@@ -286,7 +278,7 @@ interface AppliedRecordSet {
  * - 만든 레코드 id는 바로 작업 기록(op)에 남긴다.
  */
 export async function applyRecordSet(
-  db: D1Database,
+  db: Database,
   dns: DnsClient,
   leaseId: string,
   oldRows: readonly RecordRow[],
@@ -352,21 +344,31 @@ export async function applyRecordSet(
 
   // 유지·수정되지 않은 기존 행(cf_record_id가 없는 행 포함)은 DB에서 지운다.
   const dropped = oldRows.filter((r) => !kept.has(r.id));
-  const statements: D1PreparedStatement[] = [
-    ...dropped.map((r) => db.prepare(`DELETE FROM records WHERE id = ?`).bind(r.id)),
+  const statements: Write[] = [
+    ...dropped.map((r) => db.write((session) => db.records.deleteOne({ id: r.id }, { session }))),
     ...updated.map((u) =>
-      db
-        .prepare(`UPDATE records SET content = ?, proxied = ?, updated_at = ? WHERE id = ?`)
-        .bind(u.rec.content, u.rec.proxied ? 1 : 0, now, u.old.id),
+      db.write((session) =>
+        db.records.updateOne(
+          { id: u.old.id },
+          { $set: { content: u.rec.content, proxied: u.rec.proxied ? 1 : 0, updated_at: now } },
+          { session },
+        ),
+      ),
     ),
-    ...created.map((c, i) =>
-      db
-        .prepare(
-          `INSERT INTO records (id, lease_id, cf_record_id, type, host, content, proxied, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .bind(crypto.randomUUID(), leaseId, c.cfId, c.rec.type, c.rec.host, c.rec.content, c.rec.proxied ? 1 : 0, now + i, now + i),
-    ),
+    ...created.map((c, i) => {
+      const row: RecordRow = {
+        id: crypto.randomUUID(),
+        lease_id: leaseId,
+        cf_record_id: c.cfId,
+        type: c.rec.type,
+        host: c.rec.host,
+        content: c.rec.content,
+        proxied: c.rec.proxied ? 1 : 0,
+        created_at: now + i,
+        updated_at: now + i,
+      };
+      return db.write((session) => db.records.insertOne({ ...row }, { session }));
+    }),
   ];
   return { statements, toRemove: dropped.filter((r) => r.cf_record_id !== null), rollback };
 }
@@ -391,7 +393,7 @@ function auditOf(actor: Actor, entry: Omit<AuditEntry, "actorEmail" | "actorRole
 }
 
 export async function createLease(
-  db: D1Database,
+  db: Database,
   dns: DnsClient,
   config: Config,
   ownerEmail: string,
@@ -432,12 +434,7 @@ export async function createLease(
   try {
     await db.batch([
       op.finishStatement(),
-      db
-        .prepare(
-          `INSERT INTO leases (id, name, owner_email, target_kind, status, created_at, expires_at)
-           VALUES (?, ?, ?, ?, 'active', ?, ?)`,
-        )
-        .bind(id, name, ownerEmail, input.targetKind, now, lease.expires_at),
+      db.write((session) => db.leases.insertOne({ ...lease }, { session })),
       ...applied.statements,
       auditStatement(db, auditOf(actor, {
         action: "lease.create",
@@ -450,14 +447,14 @@ export async function createLease(
   } catch (err) {
     if (await applied.rollback()) await op.finish();
     // 동시에 같은 이름이 생성된 경우 uq_leases_name_live 위반
-    if (String(err).includes("UNIQUE")) throw new LeaseError(409, "taken", NAME_REASON_MESSAGES.taken);
+    if (isDuplicateKey(err)) throw new LeaseError(409, "taken", NAME_REASON_MESSAGES.taken);
     throw err;
   }
   return lease;
 }
 
 export async function replaceLeaseRecords(
-  db: D1Database,
+  db: Database,
   dns: DnsClient,
   config: Config,
   lease: LeaseRow,
@@ -501,14 +498,14 @@ export function isRenewable(lease: Pick<LeaseRow, "status" | "expires_at">, conf
   return LIVE_STATUSES.includes(lease.status) && lease.expires_at - now <= config.renewWindowDays * DAY_MS;
 }
 
-export async function renewLease(db: D1Database, config: Config, lease: LeaseRow, actor: Actor): Promise<number> {
+export async function renewLease(db: Database, config: Config, lease: LeaseRow, actor: Actor): Promise<number> {
   const now = Date.now();
   if (!isRenewable(lease, config, now)) {
     throw new LeaseError(409, "renew_not_allowed", `만료 ${config.renewWindowDays}일 이내일 때만 연장할 수 있습니다.`);
   }
   const expiresAt = now + config.leaseDays * DAY_MS;
   await db.batch([
-    db.prepare(`UPDATE leases SET expires_at = ? WHERE id = ?`).bind(expiresAt, lease.id),
+    db.write((session) => db.leases.updateOne({ id: lease.id }, { $set: { expires_at: expiresAt } }, { session })),
     auditStatement(db, auditOf(actor, {
       action: "lease.renew",
       leaseId: lease.id,
@@ -521,7 +518,7 @@ export async function renewLease(db: D1Database, config: Config, lease: LeaseRow
 }
 
 /** 반납: Cloudflare 레코드 삭제 → status `released`. DB records는 이력으로 남긴다. */
-export async function releaseLease(db: D1Database, dns: DnsClient, lease: LeaseRow, actor: Actor): Promise<void> {
+export async function releaseLease(db: Database, dns: DnsClient, lease: LeaseRow, actor: Actor): Promise<void> {
   if (!LIVE_STATUSES.includes(lease.status)) throw new LeaseStateError("이미 종료된 서브도메인입니다.");
   const records = (await getRecordsByLease(db, [lease.id])).get(lease.id) ?? [];
   const op = await beginOp(db, lease.id, "release");
@@ -529,9 +526,13 @@ export async function releaseLease(db: D1Database, dns: DnsClient, lease: LeaseR
   const now = Date.now();
   await db.batch([
     op.finishStatement(),
-    db
-      .prepare(`UPDATE leases SET status = 'released', status_reason = NULL, ended_at = ? WHERE id = ? AND status IN ('active','suspended')`)
-      .bind(now, lease.id),
+    db.write((session) =>
+      db.leases.updateOne(
+        { id: lease.id, status: { $in: ["active", "suspended"] } },
+        { $set: { status: "released", status_reason: null, ended_at: now } },
+        { session },
+      ),
+    ),
     auditStatement(db, auditOf(actor, {
       action: "lease.release",
       leaseId: lease.id,
@@ -554,7 +555,7 @@ export const RECHECK_COOLDOWN_MS = 60_000;
  * 실패해도 실패 횟수는 올리지 않는다(누적은 cron만 한다).
  */
 export async function recheckLease(
-  db: D1Database,
+  db: Database,
   dns: DnsClient,
   config: Config,
   lease: LeaseRow,
@@ -576,11 +577,10 @@ export async function recheckLease(
     detail: { ok: result.ok, detail: result.detail, status: lease.status },
     at: now,
   }));
-  const healthUpdate = result.ok
-    ? db
-        .prepare(`UPDATE leases SET last_health_check_at = ?, last_health_ok_at = ?, last_health_detail = ?, health_fail_count = 0 WHERE id = ?`)
-        .bind(now, now, result.detail, lease.id)
-    : db.prepare(`UPDATE leases SET last_health_check_at = ?, last_health_detail = ? WHERE id = ?`).bind(now, result.detail, lease.id);
+  const healthSet = result.ok
+    ? { last_health_check_at: now, last_health_ok_at: now, last_health_detail: result.detail, health_fail_count: 0 }
+    : { last_health_check_at: now, last_health_detail: result.detail };
+  const healthUpdate = db.write((session) => db.leases.updateOne({ id: lease.id }, { $set: healthSet }, { session }));
 
   if (!(result.ok && lease.status === "suspended")) {
     await db.batch([healthUpdate, recheckAudit]);
@@ -615,10 +615,14 @@ export async function recheckLease(
     await db.batch([
       op.finishStatement(),
       healthUpdate,
-      ...created.map((c) => db.prepare(`UPDATE records SET cf_record_id = ?, updated_at = ? WHERE id = ?`).bind(c.cfId, now, c.row.id)),
-      db
-        .prepare(`UPDATE leases SET status = 'active', status_reason = NULL, suspended_at = NULL WHERE id = ? AND status = 'suspended'`)
-        .bind(lease.id),
+      ...created.map((c) => db.write((session) => db.records.updateOne({ id: c.row.id }, { $set: { cf_record_id: c.cfId, updated_at: now } }, { session }))),
+      db.write((session) =>
+        db.leases.updateOne(
+          { id: lease.id, status: "suspended" },
+          { $set: { status: "active", status_reason: null, suspended_at: null } },
+          { session },
+        ),
+      ),
       recheckAudit,
       auditStatement(db, auditOf(actor, {
         action: "lease.reactivate",
@@ -642,17 +646,19 @@ export async function recheckLease(
 const SYSTEM: Actor = { email: null, role: "system" };
 
 /** 헬스체크 실패 누적으로 suspend: Cloudflare 레코드 삭제, DB records 유지(cf_record_id NULL) */
-export async function suspendLease(db: D1Database, dns: DnsClient, lease: LeaseRow, failCount: number, now = Date.now()): Promise<void> {
+export async function suspendLease(db: Database, dns: DnsClient, lease: LeaseRow, failCount: number, now = Date.now()): Promise<void> {
   const records = (await getRecordsByLease(db, [lease.id])).get(lease.id) ?? [];
   const op = await beginOp(db, lease.id, "suspend", now);
   await removeFromCloudflare(db, dns, records);
   await db.batch([
     op.finishStatement(),
-    db
-      .prepare(
-        `UPDATE leases SET status = 'suspended', status_reason = 'health_check_failed', suspended_at = ? WHERE id = ? AND status = 'active'`,
-      )
-      .bind(now, lease.id),
+    db.write((session) =>
+      db.leases.updateOne(
+        { id: lease.id, status: "active" },
+        { $set: { status: "suspended", status_reason: "health_check_failed", suspended_at: now } },
+        { session },
+      ),
+    ),
     auditStatement(db, auditOf(SYSTEM, {
       action: "system.suspend",
       leaseId: lease.id,
@@ -664,15 +670,19 @@ export async function suspendLease(db: D1Database, dns: DnsClient, lease: LeaseR
 }
 
 /** 만료: (남은) Cloudflare 레코드 삭제 → status `expired` */
-export async function expireLease(db: D1Database, dns: DnsClient, lease: LeaseRow, cause: string, now = Date.now()): Promise<void> {
+export async function expireLease(db: Database, dns: DnsClient, lease: LeaseRow, cause: string, now = Date.now()): Promise<void> {
   const records = (await getRecordsByLease(db, [lease.id])).get(lease.id) ?? [];
   const op = await beginOp(db, lease.id, "expire", now);
   await removeFromCloudflare(db, dns, records);
   await db.batch([
     op.finishStatement(),
-    db
-      .prepare(`UPDATE leases SET status = 'expired', status_reason = ?, ended_at = ? WHERE id = ? AND status IN ('active','suspended')`)
-      .bind(cause, now, lease.id),
+    db.write((session) =>
+      db.leases.updateOne(
+        { id: lease.id, status: { $in: ["active", "suspended"] } },
+        { $set: { status: "expired", status_reason: cause, ended_at: now } },
+        { session },
+      ),
+    ),
     auditStatement(db, auditOf(SYSTEM, {
       action: "system.expire",
       leaseId: lease.id,

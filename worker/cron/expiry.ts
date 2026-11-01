@@ -4,26 +4,30 @@
  * - suspended이고 expires_at < now → expired (레코드는 이미 제거됨)
  * - suspended로 NAME_HOLD_DAYS가 지남 → expired
  */
+import { NO_ID, type Database } from "../db";
 import type { Config } from "../env";
 import type { DnsClient } from "../services/cloudflare-dns";
-import { expireLease, type LeaseRow } from "../services/leases";
+import { expireLease } from "../services/leases";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-/** 한 번 실행에서 처리하는 최대 개수 (Workers 서브요청 한도 고려). 남은 것은 다음 날 처리된다. */
+/** 한 번 실행에서 처리하는 최대 개수 (실행 시간 제한 고려). 남은 것은 다음 날 처리된다. */
 export const EXPIRY_BATCH = 50;
 
-export async function runExpiry(db: D1Database, dns: DnsClient, config: Config, now = Date.now()): Promise<{ expired: number; failed: number }> {
+export async function runExpiry(db: Database, dns: DnsClient, config: Config, now = Date.now()): Promise<{ expired: number; failed: number }> {
   const holdCutoff = now - config.nameHoldDays * DAY_MS;
-  const { results } = await db
-    .prepare(
-      `SELECT * FROM leases
-        WHERE (status = 'active' AND expires_at < ?)
-           OR (status = 'suspended' AND (expires_at < ? OR suspended_at < ?))
-        ORDER BY expires_at
-        LIMIT ?`,
+  const results = await db.leases
+    .find(
+      {
+        $or: [
+          { status: "active", expires_at: { $lt: now } },
+          { status: "suspended", $or: [{ expires_at: { $lt: now } }, { suspended_at: { $lt: holdCutoff } }] },
+        ],
+      },
+      NO_ID,
     )
-    .bind(now, now, holdCutoff, EXPIRY_BATCH)
-    .all<LeaseRow>();
+    .sort({ expires_at: 1 })
+    .limit(EXPIRY_BATCH)
+    .toArray();
 
   let expired = 0;
   let failed = 0;

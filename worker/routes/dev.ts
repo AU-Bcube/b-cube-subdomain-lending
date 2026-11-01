@@ -29,7 +29,6 @@ export const devAuthRoutes = new Hono<HonoEnv>().get("/dev-login", async (c) => 
       email: persona.email,
       emailVerified: true,
       name: persona.name,
-      studentId: persona.studentId,
       sohakoeMemberships: [{ name: c.var.config.requiredSohakoe, year: "2026", semester: "10" }],
     },
     { dev: true },

@@ -28,7 +28,7 @@ export function createApp(config: Config): Hono<HonoEnv> {
   app.use("/auth/*", sessionLoader);
 
   app.get("/api/health", async (c) => {
-    await c.env.DB.prepare("SELECT 1").first();
+    await c.env.DB.ping();
     return c.json({ status: "ok", time: new Date().toISOString() });
   });
   app.route("/api/me", meRoutes);

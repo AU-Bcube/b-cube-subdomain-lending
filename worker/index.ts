@@ -1,6 +1,6 @@
 import { getApp } from "./app";
-import { runScheduled } from "./cron";
-import { getConfig } from "./env";
+import { runScheduled, type CronJob } from "./cron";
+import { type Env, getConfig } from "./env";
 import { applySecurityHeaders } from "./middleware/security-headers";
 
 function configErrorResponse(path: string): Response {
@@ -12,27 +12,27 @@ function configErrorResponse(path: string): Response {
   return res;
 }
 
-export default {
-  async fetch(request, env, ctx) {
-    let config;
-    try {
-      config = getConfig(env);
-    } catch (err) {
-      // 운영 주소 + 개발 플래그(UnsafeConfigError) 또는 필수값 누락: 모든 요청을 500으로 막는다.
-      console.error("[config]", err instanceof Error ? err.message : err);
-      return configErrorResponse(new URL(request.url).pathname);
-    }
-    return getApp(config).fetch(request, env, ctx);
-  },
+/** `/api/*`, `/auth/*` 요청 처리. Netlify 함수(netlify/functions/api.ts)와 테스트가 호출한다. */
+export async function handleRequest(request: Request, env: Env): Promise<Response> {
+  let config;
+  try {
+    config = getConfig(env);
+  } catch (err) {
+    // 운영 주소 + 개발 플래그(UnsafeConfigError) 또는 필수값 누락: 모든 요청을 500으로 막는다.
+    console.error("[config]", err instanceof Error ? err.message : err);
+    return configErrorResponse(new URL(request.url).pathname);
+  }
+  return getApp(config).fetch(request, env);
+}
 
-  async scheduled(controller, env, ctx) {
-    let config;
-    try {
-      config = getConfig(env);
-    } catch (err) {
-      console.error("[config] scheduled 작업 중단:", err instanceof Error ? err.message : err);
-      return;
-    }
-    ctx.waitUntil(runScheduled(controller.cron, env, config));
-  },
-} satisfies ExportedHandler<Env>;
+/** 예약 작업 실행. Netlify 예약 함수(netlify/functions/cron-*.ts)가 호출한다. */
+export async function handleScheduled(job: CronJob, env: Env): Promise<void> {
+  let config;
+  try {
+    config = getConfig(env);
+  } catch (err) {
+    console.error("[config] scheduled 작업 중단:", err instanceof Error ? err.message : err);
+    return;
+  }
+  await runScheduled(job, env, config);
+}

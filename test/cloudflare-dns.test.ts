@@ -1,10 +1,10 @@
-import { env } from "cloudflare:test";
+import { env } from "./env";
 import { describe, expect, it } from "vitest";
 import { parseConfig } from "../worker/env";
 import { createDnsClient, DnsError } from "../worker/services/cloudflare-dns";
 
 const liveConfig = () =>
-  parseConfig({ ...env, DNS_DRY_RUN: "false", CF_ZONE_ID: "zone123", CF_API_TOKEN: "secret-token" } as Env);
+  parseConfig({ ...env, DNS_DRY_RUN: "false", CF_ZONE_ID: "zone123", CF_API_TOKEN: "secret-token" });
 
 interface Captured {
   url: string;
