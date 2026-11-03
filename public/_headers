@@ -1,6 +1,6 @@
 # Netlify 정적 파일 응답(SPA, JS/CSS, 폰트)에 붙는 보안 헤더 (SPEC §6.4). API 응답은 worker/middleware/security-headers.ts가 붙인다.
 /*
-  Content-Security-Policy: default-src 'self'; img-src 'self' data: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com
+  Content-Security-Policy: default-src 'self'; img-src 'self' data: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; frame-src https://www.youtube-nocookie.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self' https://accounts.google.com
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
