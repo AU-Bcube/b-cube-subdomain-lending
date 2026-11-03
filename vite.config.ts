@@ -1,10 +1,22 @@
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import { netlifyFunctions } from "./scripts/vite-functions";
 
+// index.html의 오픈그래프 주소는 운영 도메인이다. Netlify 미리보기 배포에서는 그 배포의 주소로 바꿔 공유 미리보기를 확인할 수 있게 한다.
+function ogOrigin(): Plugin {
+  return {
+    name: "og-origin",
+    transformIndexHtml(html) {
+      const { CONTEXT, DEPLOY_PRIME_URL } = process.env;
+      if (!CONTEXT || CONTEXT === "production" || !DEPLOY_PRIME_URL) return html;
+      return html.replaceAll("https://domain.b-cube.kr", DEPLOY_PRIME_URL);
+    },
+  };
+}
+
 export default defineConfig({
   // netlifyFunctions(): dev/preview 서버에서 /api/*, /auth/*를 Netlify 함수로 보내고 .env를 읽는다.
-  plugins: [react(), netlifyFunctions()],
+  plugins: [react(), netlifyFunctions(), ogOrigin()],
   // APP_ORIGIN(http://localhost:5173)과 Origin 검사를 맞추기 위해 dev/preview 모두 5173을 쓴다.
   server: { port: 5173, strictPort: true },
   preview: { allowedHosts: ["0.tcp.jp.ngrok.io"], port: 5173, strictPort: true },
