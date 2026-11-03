@@ -1,3 +1,5 @@
+[![Netlify Status](https://api.netlify.com/api/v1/badges/b8c17e4e-ce8e-4c93-971a-5b6a468ded56/deploy-status)](https://app.netlify.com/projects/b-cube-subdomain-lending/deploys)
+
 <div align="center">
 
 # B-CUBE Domain Console
