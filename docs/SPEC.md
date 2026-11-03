@@ -347,8 +347,9 @@ CREATE INDEX idx_reconcile_at ON reconcile_runs(at);
 
 ### 6.4 보안 헤더 (모든 응답)
 
-- `Content-Security-Policy`: `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
+- `Content-Security-Policy`: `default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; font-src 'self' https://cdn.jsdelivr.net; frame-src https://www.youtube-nocookie.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`
   - Carbon은 셀프 호스팅, 폰트는 jsDelivr CDN(`cdn.jsdelivr.net`)에서 불러오는 기준이다. 필요하면 조정하고 보고한다.
+  - `frame-src`는 로그인 화면의 안내 영상(YouTube 개인정보 보호 모드)에만 쓴다.
 - `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`
 - API 응답에는 `Cache-Control: no-store`를 붙인다.
 

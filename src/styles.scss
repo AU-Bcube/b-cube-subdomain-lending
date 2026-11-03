@@ -76,25 +76,114 @@ body {
 
   .login-card {
     width: 100%;
-    max-width: 42rem;
+    max-width: 32rem;
   }
 
   .login-tile {
-    // 오류 알림처럼 내용이 늘어나면 박스도 함께 늘어나도록 최소 높이만 정한다.
-    min-height: 24rem;
-    padding: 2.5rem;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 1.25rem;
+    padding: 2rem;
 
-    // Stack 간격 1rem에 더해 제목–설명 2rem, 설명–버튼 5rem이 된다.
     h1 {
-      margin-bottom: 1rem;
+      margin-bottom: 1.5rem;
     }
 
-    .cds--btn {
-      margin-top: 4rem;
+    h2 {
+      margin-bottom: 0.5rem;
+      font-size: 0.875rem;
+      font-weight: 600;
+      line-height: 1.6;
+    }
+
+    p,
+    ul {
+      margin-bottom: 1.5rem;
+      font-size: 1rem;
+      line-height: 1.75;
+      color: var(--cds-text-secondary);
+      word-break: keep-all;
+    }
+
+    ul {
+      padding-left: 1.5rem;
+      list-style: disc;
+    }
+
+    strong {
+      font-weight: 600;
+      color: var(--cds-text-primary);
+    }
+
+    .login-note {
+      margin: 2rem 0 0;
+      font-size: 0.8125rem;
+    }
+
+    .cds--inline-notification {
+      max-inline-size: none;
+      margin-bottom: 1.5rem;
+    }
+
+    > .cds--btn {
+      width: 100%;
+      max-width: none;
+      margin-bottom: 2rem;
+    }
+
+    // 두 로고를 같은 칸에 겹쳐 호버로 바뀌어도 높이가 그대로이게 한다. 로고 위에서만 호버가 잡힌다.
+    .login-logo {
+      display: grid;
+      align-items: center;
+      pointer-events: none;
+
+      picture {
+        display: block;
+        grid-area: 1 / 1;
+        min-width: 0;
+      }
+
+      img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+    }
+
+    .login-logo-ko img {
+      max-width: 22.4rem;
+      pointer-events: auto;
+    }
+
+    .login-logo-en {
+      opacity: 0;
+    }
+
+    // 터치 기기에서는 눌렀을 때 호버 상태가 남으므로 바꾸지 않는다.
+    @media (hover: hover) {
+      .login-logo:hover {
+        .login-logo-ko {
+          opacity: 0;
+        }
+
+        .login-logo-en {
+          opacity: 1;
+
+          img {
+            pointer-events: auto;
+          }
+        }
+      }
+    }
+  }
+
+  .login-video {
+    margin-bottom: 1.5rem;
+    aspect-ratio: 16 / 9;
+    background: var(--cds-layer-accent-01);
+
+    iframe {
+      display: block;
+      width: 100%;
+      height: 100%;
+      border: 0;
     }
   }
 
@@ -476,9 +565,6 @@ body {
     padding: 1rem 0.5rem;
 
     .login-tile {
-      min-height: 24rem;
-      padding: 2rem;
-
       // 아이콘이 없는 버튼이라 오른쪽 아이콘 자리를 줄여 불러오는 중 문구가 320px에서도 넘치지 않게 한다.
       .cds--btn {
         padding-inline-end: 1rem;

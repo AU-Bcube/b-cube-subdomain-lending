@@ -3,7 +3,7 @@ import type { MiddlewareHandler } from "hono";
 /** SPEC §6.4. 정적 자산 응답에는 public/_headers로 같은 헤더를 붙인다. */
 export const CSP =
   "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; " +
-  "font-src 'self' https://cdn.jsdelivr.net; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
+  "font-src 'self' https://cdn.jsdelivr.net; frame-src https://www.youtube-nocookie.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 export function applySecurityHeaders(headers: Headers, path: string): void {
   headers.set("Content-Security-Policy", CSP);
