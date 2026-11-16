@@ -49,6 +49,11 @@ export const createLeaseSchema = z.object({
   records: recordsSchema,
 });
 export type CreateLeaseInput = z.infer<typeof createLeaseSchema>;
+export const adminCreateLeaseSchema = z.object({
+  ownerEmail: z.string().trim().toLowerCase().email().max(320),
+  name: z.string().max(64),
+  cname: z.string().trim().min(1).max(253),
+});
 
 export const replaceRecordsSchema = z.object({ records: recordsSchema });
 export type ReplaceRecordsInput = z.infer<typeof replaceRecordsSchema>;
