@@ -2,6 +2,7 @@ import {
   Button,
   DataTableSkeleton,
   InlineNotification,
+  Modal,
   Search,
   Select,
   SelectItem,
@@ -15,6 +16,8 @@ import {
   TableToolbar,
   TableToolbarContent,
   Tag,
+  Stack,
+  TextInput,
 } from "@carbon/react";
 import { useState } from "react";
 import { LEASE_STATUSES } from "../../../shared/rules";
@@ -38,12 +41,47 @@ export function LeasesTab() {
   const [status, setStatus] = useState("");
   const [page, setPage] = useState(1);
   const [revoking, setRevoking] = useState<AdminLeaseItem | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [ownerEmail, setOwnerEmail] = useState("");
+  const [name, setName] = useState("");
+  const [cname, setCname] = useState("");
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
   const query = useDebounced(q.trim());
   const { data, loading, error, reload } = useAsync(() => adminApi.leases({ q: query, status, page }), [query, status, page]);
   const zone = me?.zone ?? "";
 
   return (
     <div className="admin-tab">
+      <Button onClick={() => { setOwnerEmail(""); setName(""); setCname(""); setSubmitError(null); setCreating(true); }}>소유자 지정 대여 생성</Button>
+      <Modal
+        open={creating}
+        modalHeading="소유자 지정 대여 생성"
+        primaryButtonText={submitting ? "생성 중…" : "대여 생성"}
+        secondaryButtonText="취소"
+        primaryButtonDisabled={submitting || !ownerEmail.trim() || !name.trim() || !cname.trim()}
+        onRequestClose={() => { if (!submitting) setCreating(false); }}
+        onRequestSubmit={() => {
+          if (submitting || !ownerEmail.trim() || !name.trim() || !cname.trim()) return;
+          setSubmitting(true);
+          setSubmitError(null);
+          void adminApi.createLease({ ownerEmail, name, cname }).then((lease) => {
+            setCreating(false);
+            notify("success", "대여를 생성했습니다", `${lease.name}.${zone}`);
+            reload();
+          }).catch((err: unknown) => setSubmitError(err instanceof Error ? err.message : "요청이 실패했습니다."))
+            .finally(() => setSubmitting(false));
+        }}
+        preventCloseOnClickOutside
+      >
+        <Stack gap={5}>
+          <p>등록되지 않은 사용자도 이메일로 지정할 수 있습니다. 해당 사용자는 기존 로그인 자격을 충족해야 합니다.</p>
+          <TextInput id="admin-lease-owner" type="email" labelText="소유자 이메일" value={ownerEmail} onChange={(e) => setOwnerEmail(e.target.value)} data-modal-primary-focus />
+          <TextInput id="admin-lease-name" labelText={`서브도메인 이름 (.${zone} 앞부분)`} value={name} onChange={(e) => setName(e.target.value)} />
+          <TextInput id="admin-lease-cname" labelText="CNAME 대상" placeholder="example.net" value={cname} onChange={(e) => setCname(e.target.value)} />
+          {submitError && <InlineNotification kind="error" title="생성하지 못했습니다" subtitle={submitError} hideCloseButton lowContrast />}
+        </Stack>
+      </Modal>
       <TableContainer title="전체 임대" description="이름이나 소유자 이메일로 검색합니다. 사용 중·일시 중지 상태만 강제 회수할 수 있습니다.">
         <TableToolbar aria-label="임대 검색">
           <TableToolbarContent className="admin-toolbar">

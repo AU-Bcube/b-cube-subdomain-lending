@@ -1,9 +1,48 @@
 import { env } from "./env";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AdminLeaseItem, AdminUserItem, AuditLogItem, DriftItem, DriftResponse, Paged } from "../shared/schemas";
-import { ADMIN_EMAIL, auditFor, call, createLease, createUser, login, uid, type Session } from "./helpers";
+import { ADMIN_EMAIL, auditFor, call, createLease, createUser, fakeCloudflare, LIVE_DNS, login, uid, workerWith, type Session } from "./helpers";
 
 const ZONE = "b-cube.kr";
+afterEach(() => vi.restoreAllMocks());
+
+describe("POST /api/admin/leases", () => {
+  it("미등록 이메일의 CNAME을 생성하고 소유자만 관리한다", async () => {
+    const admin = await login(ADMIN_EMAIL);
+    const owner = `owner-${uid()}@ajou.ac.kr`;
+    const name = `new-${uid()}`;
+    const cf = fakeCloudflare(vi.spyOn(globalThis, "fetch"));
+    const via = workerWith(LIVE_DNS);
+    const body = { ownerEmail: ` ${owner.toUpperCase()} `, name, cname: "example.com" };
+    const res = await call("/api/admin/leases", { method: "POST", session: admin, body, via });
+    expect(res.status).toBe(201);
+    const lease = await res.json() as AdminLeaseItem;
+    expect(lease.ownerEmail).toBe(owner);
+    expect(await env.DB.users.findOne({ email: owner })).toBeNull();
+    expect([...cf.records.values()]).toEqual([expect.objectContaining({ type: "CNAME", name: `${name}.${ZONE}`, content: "example.com", comment: `bcd:lease=${lease.id}` })]);
+    expect((await auditFor({ action: "lease.create", leaseId: lease.id }))[0]).toMatchObject({ actor_email: ADMIN_EMAIL, actor_role: "admin", target_email: owner });
+    const user = await login(owner);
+    expect((await call(`/api/leases/${lease.id}`, { session: user })).status).toBe(200);
+    const other = await login(`other-${uid()}@ajou.ac.kr`);
+    expect((await call(`/api/leases/${lease.id}`, { session: other })).status).toBe(404);
+    expect((await call(`/api/leases/${lease.id}/records`, { method: "PUT", session: user, via, body: { records: [{ type: "CNAME", host: `${name}.${ZONE}`, content: "example.org" }] } })).status).toBe(200);
+    expect([...cf.records.values()][0]?.content).toBe("example.org");
+  });
+
+  it("권한, CSRF, 입력과 차단 상태를 검사한다", async () => {
+    const admin = await login(ADMIN_EMAIL);
+    const member = await login(`member-${uid()}@ajou.ac.kr`);
+    const owner = `banned-${uid()}@ajou.ac.kr`;
+    await createUser(owner, { banned: true });
+    const body = { ownerEmail: owner, name: `new-${uid()}`, cname: "example.com" };
+    expect((await call("/api/admin/leases", { method: "POST", body })).status).toBe(403);
+    expect((await call("/api/admin/leases", { method: "POST", session: member, body })).status).toBe(403);
+    expect((await call("/api/admin/leases", { method: "POST", session: admin, body, csrf: "wrong" })).status).toBe(403);
+    expect((await call("/api/admin/leases", { method: "POST", session: admin, body })).status).toBe(409);
+    expect((await call("/api/admin/leases", { method: "POST", session: admin, body: { ...body, ownerEmail: "other@example.com" } })).status).toBe(400);
+    expect((await call("/api/admin/leases", { method: "POST", session: admin, body: { ...body, ownerEmail: member.email, cname: "127.0.0.1" } })).status).toBe(400);
+  });
+});
 
 async function leaseRow(id: string) {
   return env.DB.leases.findOne({ id });

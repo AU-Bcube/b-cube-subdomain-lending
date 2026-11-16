@@ -11,6 +11,8 @@ function qs(params: Record<string, string | number | undefined>): string {
 }
 
 export const adminApi = {
+  createLease: (input: { ownerEmail: string; name: string; cname: string }) =>
+    api<AdminLeaseItem>("/api/admin/leases", { method: "POST", json: input }),
   leases: (p: { status?: string; q?: string; page: number }) => api<Paged<AdminLeaseItem>>(`/api/admin/leases${qs(p)}`),
   revoke: (id: string, reason: string) =>
     api<{ ok: true }>(`/api/admin/leases/${encodeURIComponent(id)}/revoke`, { method: "POST", json: { reason } }),

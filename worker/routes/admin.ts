@@ -3,6 +3,7 @@ import { z } from "zod";
 import { LEASE_STATUSES } from "../../shared/rules";
 import {
   AUDIT_ACTIONS,
+  adminCreateLeaseSchema,
   optionalReasonSchema,
   reasonSchema,
   type AdminLeaseItem,
@@ -22,6 +23,7 @@ import { acquireLock, getLock, RECOVER_LOCK, RECOVER_LOCK_MS } from "../services
 import { changedCount, recoverPendingOps } from "../services/repair";
 import {
   getLease,
+  createLease,
   getRecordsByLease,
   LeaseError,
   LeaseStateError,
@@ -78,6 +80,29 @@ function leaseItem(row: LeaseRow, records: AdminLeaseItem["records"]): AdminLeas
 
 export const adminRoutes = new Hono<HonoEnv>()
   .use("*", requireUser, requireAdmin)
+
+  .post("/leases", async (c) => {
+    const input = await readBody(c, adminCreateLeaseSchema);
+    if (input instanceof Response) return input;
+    const { ownerEmail } = input;
+    if (!ownerEmail.endsWith(`@${c.var.config.allowedEmailDomain}`)) {
+      return apiError(c, 400, "invalid_input", `소유자는 @${c.var.config.allowedEmailDomain} 이메일을 사용해야 합니다.`);
+    }
+    const owner = await c.env.DB.users.findOne({ email: ownerEmail });
+    if (owner?.banned_at != null) return apiError(c, 409, "banned", "차단된 사용자에게 대여할 수 없습니다.");
+    const name = input.name.trim().toLowerCase();
+    try {
+      const lease = await createLease(c.env.DB, createDnsClient(c.var.config), c.var.config, ownerEmail, {
+        name, targetKind: "cname", records: [{ type: "CNAME", host: `${name}.${c.var.config.zoneName}`, content: input.cname }],
+      }, adminActor(c));
+      const records = (await getRecordsByLease(c.env.DB, [lease.id])).get(lease.id) ?? [];
+      return c.json(leaseItem(lease, records.map(toRecordView)), 201);
+    } catch (err) {
+      if (err instanceof LeaseError) return c.json({ error: { code: err.code, message: err.message, ...(err.errors ? { errors: err.errors } : {}) } }, err.status);
+      if (err instanceof DnsError) return apiError(c, 502, "dns_error", err.message);
+      throw err;
+    }
+  })
 
   // 전체 lease (이름/소유자 검색)
   .get("/leases", async (c) => {
